@@ -5,6 +5,7 @@ from django.contrib import messages
 from django.db import transaction
 from django.http import FileResponse, Http404, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext as _, gettext_lazy as _lazy
 from django.views.generic import DetailView, ListView, View
 from django.views.generic.edit import FormView
@@ -166,7 +167,31 @@ class SpeechRecordingUploadView(AdministratorMixin, TournamentMixin, FormView):
 class SpeechRecordingStatusCheckView(AdministratorMixin, TournamentMixin, View):
     """Endpoint to check the transcription status of an existing recording and persist transcripts upon completion."""
 
-    def get(self, request, *args, **kwargs):
+    def _is_html_request(self):
+        accept = self.request.headers.get('accept', '')
+        return ('text/html' in accept and 'application/json' not in accept) or (self.request.GET.get('format') == 'html')
+
+    def _redirect_html(self, request, msg, level=messages.INFO):
+        if level == messages.SUCCESS:
+            messages.success(request, msg)
+        elif level == messages.WARNING:
+            messages.warning(request, msg)
+        elif level == messages.ERROR:
+            messages.error(request, msg)
+        else:
+            messages.info(request, msg)
+
+        referer = request.META.get('HTTP_REFERER')
+        if referer and url_has_allowed_host_and_scheme(
+            url=referer,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            return HttpResponseRedirect(referer)
+
+        return HttpResponseRedirect(reverse_tournament('speech-analytics-dashboard', self.tournament))
+
+    def _process_status_check(self, request, *args, **kwargs):
         recording_id = self.kwargs.get('recording_id')
 
         # Retrieve recording strictly scoped to the current tournament
@@ -176,9 +201,13 @@ class SpeechRecordingStatusCheckView(AdministratorMixin, TournamentMixin, View):
             debate__round__tournament=self.tournament,
         )
 
+        is_html = self._is_html_request()
+
         # 1. If already completed, return immediately without touching external API
         if recording.status == SpeechRecording.Status.COMPLETED:
             has_transcript = hasattr(recording, 'transcript')
+            if is_html:
+                return self._redirect_html(request, _("Transcription has already completed."), messages.INFO)
             return JsonResponse({
                 'recording_id': recording.id,
                 'status': recording.status,
@@ -188,6 +217,8 @@ class SpeechRecordingStatusCheckView(AdministratorMixin, TournamentMixin, View):
 
         # 2. If no job_id exists (e.g. initial submission failed)
         if not recording.job_id:
+            if is_html:
+                return self._redirect_html(request, recording.error_message or _("No active transcription job associated with this recording."), messages.WARNING)
             return JsonResponse({
                 'recording_id': recording.id,
                 'status': recording.status,
@@ -237,6 +268,8 @@ class SpeechRecordingStatusCheckView(AdministratorMixin, TournamentMixin, View):
 
         except GnaniSTTError as exc:
             logger.warning("Status check failed for recording #%s: %s", recording.pk, exc.message)
+            if is_html:
+                return self._redirect_html(request, _("Failed to check status: %s") % exc.message, messages.ERROR)
             return JsonResponse({
                 'recording_id': recording.id,
                 'status': recording.status,
@@ -245,6 +278,8 @@ class SpeechRecordingStatusCheckView(AdministratorMixin, TournamentMixin, View):
             }, status=502)
         except Exception as exc:
             logger.exception("Unexpected error during status check for recording #%s", recording.pk)
+            if is_html:
+                return self._redirect_html(request, _("Failed to communicate with transcription service."), messages.ERROR)
             return JsonResponse({
                 'recording_id': recording.id,
                 'status': recording.status,
@@ -253,12 +288,26 @@ class SpeechRecordingStatusCheckView(AdministratorMixin, TournamentMixin, View):
             }, status=500)
 
         # Do not expose internal provider job_id to client
+        if is_html:
+            if recording.status == SpeechRecording.Status.COMPLETED:
+                return self._redirect_html(request, _("Transcription completed successfully!"), messages.SUCCESS)
+            elif recording.status == SpeechRecording.Status.FAILED:
+                return self._redirect_html(request, _("Transcription failed: %s") % recording.error_message, messages.ERROR)
+            else:
+                return self._redirect_html(request, _("Transcription is still in progress. Please check again in a moment."), messages.INFO)
+
         return JsonResponse({
             'recording_id': recording.id,
             'status': recording.status,
             'transcript_available': hasattr(recording, 'transcript'),
             'error': recording.error_message or None,
         })
+
+    def post(self, request, *args, **kwargs):
+        return self._process_status_check(request, *args, **kwargs)
+
+    def get(self, request, *args, **kwargs):
+        return self._process_status_check(request, *args, **kwargs)
 
 
 class SpeechTranscriptDetailView(AdministratorMixin, TournamentMixin, DetailView):

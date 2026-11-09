@@ -15,6 +15,17 @@
   </a>
 {% endblock %}
 
+{% block page-subnav-actions %}
+  {% if recording.status == 'P' or recording.status == 'R' %}
+    <form method="post" action="{% tournamenturl 'speech-recording-status' recording_id=recording.id %}" class="d-inline check-status-form">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-info check-status-btn" data-recording-id="{{ recording.id }}">
+        <i data-feather="refresh-cw"></i> {% trans "Check Status" %}
+      </button>
+    </form>
+  {% endif %}
+{% endblock %}
+
 {% block content %}
 <div class="row">
 
@@ -96,13 +107,25 @@
       <div class="alert alert-warning">
         <i data-feather="clock"></i>
         <strong>{% trans "Pending Transcription" %}</strong>
-        <p class="mb-0 small mt-1">{% trans "This recording is queued for transcription processing." %}</p>
+        <p class="mb-2 small mt-1">{% trans "This recording is queued for transcription processing." %}</p>
+        <form method="post" action="{% tournamenturl 'speech-recording-status' recording_id=recording.id %}" class="d-inline check-status-form">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-sm btn-outline-warning text-dark check-status-btn">
+            <i data-feather="refresh-cw"></i> {% trans "Check Status Now" %}
+          </button>
+        </form>
       </div>
     {% elif recording.status == 'R' %}
       <div class="alert alert-info">
         <i data-feather="loader"></i>
         <strong>{% trans "Processing Audio" %}</strong>
-        <p class="mb-0 small mt-1">{% trans "Transcription is currently underway. Check back shortly." %}</p>
+        <p class="mb-2 small mt-1">{% trans "Transcription is currently underway. Check back shortly." %}</p>
+        <form method="post" action="{% tournamenturl 'speech-recording-status' recording_id=recording.id %}" class="d-inline check-status-form">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-sm btn-outline-info check-status-btn">
+            <i data-feather="refresh-cw"></i> {% trans "Check Status Now" %}
+          </button>
+        </form>
       </div>
     {% elif recording.status == 'F' %}
       <div class="alert alert-danger">
@@ -204,3 +227,27 @@
 
 </div>
 {% endblock content %}
+
+{% block js %}
+  {{ block.super }}
+  <script>
+    (function() {
+      document.addEventListener('submit', function(e) {
+        var form = e.target.closest('.check-status-form');
+        if (!form) return;
+
+        var btn = form.querySelector('.check-status-btn');
+        if (!btn) return;
+
+        if (btn.classList.contains('disabled') || btn.disabled) {
+          e.preventDefault();
+          return;
+        }
+
+        btn.classList.add('disabled');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> {% trans "Checking..." %}';
+      });
+    })();
+  </script>
+{% endblock js %}

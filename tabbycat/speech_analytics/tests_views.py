@@ -633,3 +633,126 @@ class SpeechRecordingWorkflowTests(TestCase):
         self.client.force_login(non_admin)
         response_non_admin = self.client.get(audio_url)
         self.assertEqual(response_non_admin.status_code, 403)
+
+    # 25. HTML Status Refresh: Check Status action triggers refresh via POST and redirects with message
+    @patch('speech_analytics.views.GnaniPrismaBatchClient')
+    def test_status_check_html_redirect_and_messages(self, MockClientClass):
+        mock_client = MockClientClass.return_value
+        mock_client.get_job_status.return_value = {'job_id': 'job_html_refresh', 'status': 'COMPLETED'}
+        mock_client.fetch_completed_transcript.return_value = {
+            'text': "Speech transcript refreshed via UI click.",
+            'language_code': 'en-IN',
+            'metadata': {'confidence': 0.97},
+        }
+
+        recording = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker1,
+            audio_file=self._create_audio_file("refresh.wav"),
+            job_id='job_html_refresh',
+            status=SpeechRecording.Status.PROCESSING,
+        )
+
+        status_url = reverse('speech-recording-status', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+
+        # Request via standard browser form submission (POST request with text/html Accept header)
+        response = self.client.post(status_url, HTTP_REFERER=dashboard_url, HTTP_ACCEPT='text/html', follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertRedirects(response, dashboard_url)
+
+        # Success message displayed
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any("completed successfully" in str(m) for m in messages_list))
+
+        # Dashboard shows View Transcript link now
+        self.assertContains(response, "View Transcript")
+        recording.refresh_from_db()
+        self.assertEqual(recording.status, SpeechRecording.Status.COMPLETED)
+        self.assertEqual(recording.transcript.text, "Speech transcript refreshed via UI click.")
+
+    # 26. HTML Status Refresh: Failed status update displays error message
+    @patch('speech_analytics.views.GnaniPrismaBatchClient')
+    def test_status_check_html_failure_redirect(self, MockClientClass):
+        mock_client = MockClientClass.return_value
+        mock_client.get_job_status.return_value = {
+            'job_id': 'job_html_fail',
+            'status': 'FAILED',
+            'error': 'Audio corrupted',
+        }
+
+        recording = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker1,
+            audio_file=self._create_audio_file("fail_refresh.wav"),
+            job_id='job_html_fail',
+            status=SpeechRecording.Status.PROCESSING,
+        )
+
+        status_url = reverse('speech-recording-status', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+
+        response = self.client.post(status_url, HTTP_REFERER=dashboard_url, HTTP_ACCEPT='text/html', follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertRedirects(response, dashboard_url)
+
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any("Audio corrupted" in str(m) for m in messages_list))
+        recording.refresh_from_db()
+        self.assertEqual(recording.status, SpeechRecording.Status.FAILED)
+        self.assertEqual(recording.error_message, "Audio corrupted")
+
+    # 27. Dashboard displays "Check Status" for PENDING and PROCESSING recordings
+    def test_dashboard_renders_check_status_action(self):
+        rec_pending = SpeechRecording.objects.create(
+            debate=self.debate,
+            audio_file=self._create_audio_file("p.wav"),
+            status=SpeechRecording.Status.PENDING,
+        )
+        rec_processing = SpeechRecording.objects.create(
+            debate=self.debate,
+            audio_file=self._create_audio_file("r.wav"),
+            status=SpeechRecording.Status.PROCESSING,
+        )
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+        response = self.client.get(dashboard_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Check Status")
+        # Ensure URLs to status check endpoint are rendered in the action buttons/forms
+        status_url_p = reverse('speech-recording-status', kwargs={'tournament_slug': self.tournament.slug, 'recording_id': rec_pending.id})
+        status_url_r = reverse('speech-recording-status', kwargs={'tournament_slug': self.tournament.slug, 'recording_id': rec_processing.id})
+        self.assertContains(response, status_url_p)
+        self.assertContains(response, status_url_r)
+
+    # 28. Unsafe HTTP_REFERER redirect is prevented and falls back to dashboard
+    @patch('speech_analytics.views.GnaniPrismaBatchClient')
+    def test_unsafe_referer_redirect_prevented(self, MockClientClass):
+        mock_client = MockClientClass.return_value
+        mock_client.get_job_status.return_value = {'job_id': 'job_unsafe', 'status': 'IN_PROGRESS'}
+
+        recording = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker1,
+            audio_file=self._create_audio_file("unsafe.wav"),
+            job_id='job_unsafe',
+            status=SpeechRecording.Status.PROCESSING,
+        )
+
+        status_url = reverse('speech-recording-status', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+
+        # Malicious external referer
+        external_referer = "https://evil-attacker.com/phishing"
+        response = self.client.post(status_url, HTTP_REFERER=external_referer, HTTP_ACCEPT='text/html')
+        self.assertEqual(response.status_code, 302)
+        # Verify it falls back to internal tournament dashboard rather than redirecting to external site
+        self.assertEqual(response.url, dashboard_url)
