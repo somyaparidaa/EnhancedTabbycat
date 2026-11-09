@@ -449,3 +449,15 @@ PUSH_NOTIFICATIONS_SETTINGS = {
     "application_server_key": os.environ.get("WP_APPLICATION_SERVER_KEY")
 }
 ENABLE_PUSH_NOTIFICATIONS = os.environ.get("WP_PRIVATE_KEY") is not None
+
+# ==============================================================================
+# Speech Analytics & Speech-to-Text (Gnani AI Prisma)
+# ==============================================================================
+
+GNANI_API_KEY = os.environ.get('GNANI_API_KEY', '')
+GNANI_API_BASE_URL = os.environ.get('GNANI_API_BASE_URL', 'https://api.vachana.ai')
+GNANI_API_TIMEOUT = (
+    int(os.environ.get('GNANI_CONNECT_TIMEOUT', 10)),
+    int(os.environ.get('GNANI_READ_TIMEOUT', 60)),
+)
+

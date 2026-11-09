@@ -38,10 +38,12 @@ class SpeechRecordingModelTests(TestCase):
             debate=self.debate,
             speaker=self.speaker1,
             audio_file=self._create_dummy_audio("alice.wav"),
+            job_id="gnani_job_abc123",
         )
         self.assertIsNotNone(recording.pk)
         self.assertEqual(recording.speaker, self.speaker1)
         self.assertEqual(recording.status, SpeechRecording.Status.PENDING)
+        self.assertEqual(recording.job_id, "gnani_job_abc123")
 
     def test_speaker_belonging_to_different_debate_raises_validation_error(self):
         """A speaker whose team is not competing in the debate is rejected."""

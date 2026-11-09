@@ -68,6 +68,14 @@ class SpeechRecording(models.Model):
         default=Status.PENDING,
         verbose_name=_("status"),
     )
+    job_id = models.CharField(
+        max_length=128,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Gnani job ID"),
+        help_text=_("Asynchronous Batch STT job ID from Gnani Prisma."),
+    )
     error_message = models.TextField(
         blank=True,
         verbose_name=_("error message"),

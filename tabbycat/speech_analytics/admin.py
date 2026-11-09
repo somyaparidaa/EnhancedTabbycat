@@ -22,10 +22,12 @@ class SpeechRecordingAdmin(TabbycatModelAdminFieldsMixin, ModelAdmin):
         'debate',
         'speaker',
         'status',
+        'job_id',
         'created_at',
     )
     list_filter = ('status', 'debate__round__tournament')
     search_fields = (
+        'job_id',
         'speaker__name',
         'debate__round__tournament__name',
         'error_message',
