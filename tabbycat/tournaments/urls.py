@@ -53,6 +53,7 @@ urlpatterns = [
     path('admin/users/',            include('users.urls_admin')),
     path('admin/venues/',           include('venues.urls_admin')),
     path('admin/registration/',     include('registration.urls_admin')),
+    path('admin/speech-analytics/', include('speech_analytics.urls_admin')),
 
     # Application URLs for assistant pages
     path('assistant/feedback/',     include('adjfeedback.urls_assistant')),

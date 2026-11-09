@@ -460,4 +460,7 @@ GNANI_API_TIMEOUT = (
     int(os.environ.get('GNANI_CONNECT_TIMEOUT', 10)),
     int(os.environ.get('GNANI_READ_TIMEOUT', 60)),
 )
+SPEECH_ANALYTICS_MAX_UPLOAD_SIZE = int(os.environ.get('SPEECH_MAX_UPLOAD_SIZE', 100 * 1024 * 1024))  # 100 MB default
+SPEECH_ANALYTICS_ALLOWED_EXTENSIONS = ('.wav', '.mp3', '.m4a', '.ogg', '.flac', '.aac')
+
 
