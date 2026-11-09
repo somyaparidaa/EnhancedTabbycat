@@ -64,9 +64,9 @@
                 </td>
                 <td class="text-right">
                   {% if recording.status == 'C' and recording.transcript %}
-                    <span class="badge badge-success">
-                      <i data-feather="check-circle"></i> {% trans "Transcript ready" %}
-                    </span>
+                    <a href="{% tournamenturl 'speech-transcript-detail' recording_id=recording.id %}" class="btn btn-sm btn-outline-primary">
+                      <i data-feather="file-text"></i> {% trans "View Transcript" %}
+                    </a>
                   {% else %}
                     <span class="text-muted small">{% trans "No transcript" %}</span>
                   {% endif %}

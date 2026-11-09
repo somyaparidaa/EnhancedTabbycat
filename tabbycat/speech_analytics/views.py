@@ -1,11 +1,12 @@
+import json
 import logging
 from django.conf import settings
 from django.contrib import messages
 from django.db import transaction
-from django.http import Http404, HttpResponseRedirect, JsonResponse
+from django.http import FileResponse, Http404, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils.translation import gettext as _, gettext_lazy as _lazy
-from django.views.generic import ListView, View
+from django.views.generic import DetailView, ListView, View
 from django.views.generic.edit import FormView
 
 from tournaments.mixins import TournamentMixin
@@ -258,3 +259,75 @@ class SpeechRecordingStatusCheckView(AdministratorMixin, TournamentMixin, View):
             'transcript_available': hasattr(recording, 'transcript'),
             'error': recording.error_message or None,
         })
+
+
+class SpeechTranscriptDetailView(AdministratorMixin, TournamentMixin, DetailView):
+    """View to display detailed transcript, diarized segments, and status for a recording."""
+
+    model = SpeechRecording
+    template_name = 'speech_analytics/transcript_detail.html'
+    context_object_name = 'recording'
+    pk_url_kwarg = 'recording_id'
+    page_title = _lazy("Speech Transcript")
+    page_emoji = "📝"
+
+    def get_queryset(self):
+        return SpeechRecording.objects.filter(
+            debate__round__tournament=self.tournament,
+        ).select_related(
+            'debate__round__tournament',
+            'debate__venue',
+            'speaker__team',
+        ).prefetch_related(
+            'transcript',
+            'debate__debateteam_set__team',
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        recording = self.object
+        transcript = getattr(recording, 'transcript', None)
+        context['transcript'] = transcript
+
+        diarized_segments = []
+        transcript_metadata_json = ""
+        if transcript and transcript.metadata:
+            meta = transcript.metadata
+            try:
+                transcript_metadata_json = json.dumps(meta, indent=2, ensure_ascii=False)
+            except Exception:
+                transcript_metadata_json = str(meta)
+
+            if isinstance(meta, dict):
+                # Check for standard diarization structures
+                segments = meta.get('diarization') or meta.get('segments') or meta.get('words')
+                if isinstance(segments, list):
+                    for item in segments:
+                        if isinstance(item, dict) and ('speaker' in item or 'text' in item):
+                            diarized_segments.append(item)
+
+        context['diarized_segments'] = diarized_segments
+        context['transcript_metadata_json'] = transcript_metadata_json
+        return context
+
+
+class SpeechRecordingAudioStreamView(AdministratorMixin, TournamentMixin, View):
+    """Protected audio streaming endpoint for tournament administrators."""
+
+    def get(self, request, *args, **kwargs):
+        recording_id = self.kwargs.get('recording_id')
+        recording = get_object_or_404(
+            SpeechRecording.objects.select_related('debate__round__tournament'),
+            pk=recording_id,
+            debate__round__tournament=self.tournament,
+        )
+
+        if not recording.audio_file:
+            raise Http404(_("No audio file found for this recording."))
+
+        try:
+            file_handle = recording.audio_file.open('rb')
+        except (OSError, IOError) as exc:
+            raise Http404(_("Audio file could not be opened.")) from exc
+
+        return FileResponse(file_handle, as_attachment=False)

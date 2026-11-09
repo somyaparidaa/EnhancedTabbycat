@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% load debate_tags i18n %}
+
+{% block head-title %}<span class="emoji">📝</span> {% trans "Speech Recording & Transcript" %}{% endblock %}
+{% block page-title %}{% trans "Speech Recording & Transcript" %}{% endblock %}
+{% block page-subtitle %}
+  {% blocktrans trimmed with round=recording.debate.round.abbreviation matchup=recording.debate.matchup %}
+    {{ round }}: {{ matchup }}
+  {% endblocktrans %}
+{% endblock %}
+
+{% block page-subnav-sections %}
+  <a class="btn btn-outline-primary" href="{% tournamenturl 'speech-analytics-dashboard' %}">
+    <i data-feather="chevron-left"></i> {% trans "Back to Speech Analytics" %}
+  </a>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+
+  <!-- Metadata and Recording Info Column -->
+  <div class="col-lg-4 col-12 mb-4">
+    <div class="card mb-3">
+      <div class="card-header font-weight-bold">
+        <i data-feather="info"></i> {% trans "Recording Information" %}
+      </div>
+      <div class="list-group list-group-flush small">
+        <div class="list-group-item d-flex justify-content-between align-items-center">
+          <span class="text-muted">{% trans "Round" %}</span>
+          <span class="font-weight-bold">{{ recording.debate.round.name }}</span>
+        </div>
+        <div class="list-group-item d-flex justify-content-between align-items-center">
+          <span class="text-muted">{% trans "Debate" %}</span>
+          <span>{{ recording.debate.matchup }}</span>
+        </div>
+        <div class="list-group-item d-flex justify-content-between align-items-center">
+          <span class="text-muted">{% trans "Speaker" %}</span>
+          <span>
+            {% if recording.speaker %}
+              <strong>{{ recording.speaker.name }}</strong>
+              <small class="text-muted">({{ recording.speaker.team.short_name }})</small>
+            {% else %}
+              <span class="text-muted italic">{% trans "Unassigned" %}</span>
+            {% endif %}
+          </span>
+        </div>
+        <div class="list-group-item d-flex justify-content-between align-items-center">
+          <span class="text-muted">{% trans "Status" %}</span>
+          <span>
+            {% if recording.status == 'P' %}
+              <span class="badge badge-warning">{% trans "Pending" %}</span>
+            {% elif recording.status == 'R' %}
+              <span class="badge badge-info">{% trans "Processing" %}</span>
+            {% elif recording.status == 'C' %}
+              <span class="badge badge-success">{% trans "Completed" %}</span>
+            {% elif recording.status == 'F' %}
+              <span class="badge badge-danger">{% trans "Failed" %}</span>
+            {% else %}
+              <span class="badge badge-secondary">{{ recording.get_status_display }}</span>
+            {% endif %}
+          </span>
+        </div>
+        <div class="list-group-item d-flex justify-content-between align-items-center">
+          <span class="text-muted">{% trans "Uploaded At" %}</span>
+          <span>{{ recording.created_at|date:"SHORT_DATETIME_FORMAT" }}</span>
+        </div>
+        {% if transcript %}
+          <div class="list-group-item d-flex justify-content-between align-items-center">
+            <span class="text-muted">{% trans "Language" %}</span>
+            <span class="badge badge-light border">{{ transcript.language_code }}</span>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Audio Playback Card -->
+    {% if recording.audio_file %}
+      <div class="card mb-3">
+        <div class="card-header font-weight-bold">
+          <i data-feather="volume-2"></i> {% trans "Audio Playback" %}
+        </div>
+        <div class="card-body">
+          <audio controls class="w-100" preload="metadata">
+            <source src="{% tournamenturl 'speech-recording-audio' recording_id=recording.id %}">
+            {% trans "Your browser does not support the audio element." %}
+          </audio>
+          <div class="mt-2 text-muted small">
+            <i data-feather="file"></i> <code>{{ recording.audio_file.name|slice:"-35:" }}</code>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    <!-- Status Alerts for Non-Completed States -->
+    {% if recording.status == 'P' %}
+      <div class="alert alert-warning">
+        <i data-feather="clock"></i>
+        <strong>{% trans "Pending Transcription" %}</strong>
+        <p class="mb-0 small mt-1">{% trans "This recording is queued for transcription processing." %}</p>
+      </div>
+    {% elif recording.status == 'R' %}
+      <div class="alert alert-info">
+        <i data-feather="loader"></i>
+        <strong>{% trans "Processing Audio" %}</strong>
+        <p class="mb-0 small mt-1">{% trans "Transcription is currently underway. Check back shortly." %}</p>
+      </div>
+    {% elif recording.status == 'F' %}
+      <div class="alert alert-danger">
+        <i data-feather="alert-triangle"></i>
+        <strong>{% trans "Transcription Failed" %}</strong>
+        {% if recording.error_message %}
+          <p class="mb-0 small mt-1">{{ recording.error_message }}</p>
+        {% else %}
+          <p class="mb-0 small mt-1">{% trans "An error occurred while transcribing this recording." %}</p>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- Transcript Content Column -->
+  <div class="col-lg-8 col-12">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="font-weight-bold">
+          <i data-feather="file-text"></i> {% trans "Transcript" %}
+        </span>
+        {% if transcript and transcript.created_at %}
+          <small class="text-muted">
+            {% trans "Generated" %}: {{ transcript.created_at|date:"SHORT_DATETIME_FORMAT" }}
+          </small>
+        {% endif %}
+      </div>
+      <div class="card-body">
+
+        {% if transcript %}
+          {% if diarized_segments %}
+            <!-- Diarized Segments Display -->
+            <h6 class="font-weight-bold text-muted mb-3">{% trans "Speaker Diarization & Segments" %}</h6>
+            <div class="list-group mb-4">
+              {% for segment in diarized_segments %}
+                <div class="list-group-item">
+                  <div class="d-flex w-100 justify-content-between mb-1">
+                    <strong class="text-primary">
+                      <i data-feather="user"></i>
+                      {{ segment.speaker|default:_("Speaker") }}
+                    </strong>
+                    {% if segment.start is not None and segment.end is not None %}
+                      <small class="text-muted">
+                        {{ segment.start|floatformat:1 }}s - {{ segment.end|floatformat:1 }}s
+                      </small>
+                    {% endif %}
+                  </div>
+                  <p class="mb-1 text-dark">{{ segment.text }}</p>
+                  {% if segment.confidence %}
+                    <small class="text-muted">
+                      {% trans "Confidence" %}: {{ segment.confidence|floatformat:2 }}
+                    </small>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+            <h6 class="font-weight-bold text-muted mb-2">{% trans "Full Transcript Text" %}</h6>
+          {% endif %}
+
+          {% if transcript.text %}
+            <div class="p-3 bg-light rounded border text-body" style="white-space: pre-wrap; font-size: 1.05rem; line-height: 1.6;">
+              {{ transcript.text }}
+            </div>
+          {% else %}
+            <div class="text-muted italic">
+              {% trans "Transcript completed but text is empty." %}
+            </div>
+          {% endif %}
+
+          {% if transcript.metadata %}
+            <details class="mt-4">
+              <summary class="small text-muted font-weight-bold" style="cursor: pointer;">
+                <i data-feather="code"></i> {% trans "View Transcription Metadata" %}
+              </summary>
+              <pre class="bg-dark text-white p-3 rounded mt-2 small" style="max-height: 250px; overflow-y: auto;"><code>{{ transcript_metadata_json }}</code></pre>
+            </details>
+          {% endif %}
+
+        {% else %}
+          <!-- No Transcript Available Yet -->
+          <div class="text-center py-5 text-muted">
+            <i data-feather="file-text" style="width: 48px; height: 48px;" class="mb-3 text-secondary"></i>
+            <h5>{% trans "No Transcript Available" %}</h5>
+            {% if recording.status == 'P' %}
+              <p class="mb-0">{% trans "The recording is waiting to be processed." %}</p>
+            {% elif recording.status == 'R' %}
+              <p class="mb-0">{% trans "The audio is currently being processed. Please refresh in a moment." %}</p>
+            {% elif recording.status == 'F' %}
+              <p class="mb-0 text-danger">{% trans "Transcription failed. No transcript could be generated." %}</p>
+            {% else %}
+              <p class="mb-0">{% trans "A transcript has not yet been generated for this recording." %}</p>
+            {% endif %}
+          </div>
+        {% endif %}
+
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock content %}

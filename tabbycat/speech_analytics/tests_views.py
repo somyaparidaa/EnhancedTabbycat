@@ -360,7 +360,7 @@ class SpeechRecordingWorkflowTests(TestCase):
         self.assertIn("Processing", content)
         self.assertIn("Completed", content)
         self.assertIn("Failed", content)
-        self.assertIn("Transcript ready", content)
+        self.assertIn("View Transcript", content)
 
     # 12. Dashboard empty state renders when no recordings exist
     def test_dashboard_empty_state(self):
@@ -482,3 +482,154 @@ class SpeechRecordingWorkflowTests(TestCase):
         # Context preserved
         self.assertEqual(form.data.get('speaker'), str(self.speaker1.id))
         self.assertContains(response, "Please correct the errors indicated below.")
+
+    # 19. Transcript Detail: Completed recording displays full transcript and diarization
+    def test_transcript_detail_completed_displays_transcript(self):
+        recording = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker1,
+            audio_file=self._create_audio_file("comp_detail.wav"),
+            status=SpeechRecording.Status.COMPLETED,
+        )
+        SpeechTranscript.objects.create(
+            recording=recording,
+            text="This is the winning speech transcript.",
+            language_code="en-IN",
+            metadata={
+                "model": "prisma-v2.5",
+                "diarization": [
+                    {"speaker": "Speaker 1", "start": 0.0, "end": 4.5, "text": "This is the winning", "confidence": 0.95},
+                    {"speaker": "Speaker 1", "start": 4.6, "end": 6.8, "text": "speech transcript.", "confidence": 0.98},
+                ],
+            },
+        )
+
+        detail_url = reverse('speech-transcript-detail', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'speech_analytics/transcript_detail.html')
+        self.assertContains(response, "This is the winning speech transcript.")
+        self.assertContains(response, "Speaker Diarization & Segments")
+        self.assertContains(response, "Speaker 1")
+        self.assertContains(response, "en-IN")
+        self.assertContains(response, "Alice")
+        self.assertContains(response, "Audio Playback")
+
+    # 20. Transcript Detail: Pending and Processing states display gracefully without crash
+    def test_transcript_detail_pending_and_processing_states(self):
+        recording_p = SpeechRecording.objects.create(
+            debate=self.debate,
+            audio_file=self._create_audio_file("pending_detail.wav"),
+            status=SpeechRecording.Status.PENDING,
+        )
+        detail_url = reverse('speech-transcript-detail', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording_p.id,
+        })
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Pending Transcription")
+        self.assertContains(response, "No Transcript Available")
+
+        recording_p.status = SpeechRecording.Status.PROCESSING
+        recording_p.save()
+        response2 = self.client.get(detail_url)
+        self.assertEqual(response2.status_code, 200)
+        self.assertContains(response2, "Processing Audio")
+
+    # 21. Transcript Detail: Failed recording displays safe error information
+    def test_transcript_detail_failed_state(self):
+        recording_f = SpeechRecording.objects.create(
+            debate=self.debate,
+            audio_file=self._create_audio_file("failed_detail.wav"),
+            status=SpeechRecording.Status.FAILED,
+            error_message="Audio sample rate not supported by engine",
+        )
+        detail_url = reverse('speech-transcript-detail', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording_f.id,
+        })
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Transcription Failed")
+        self.assertContains(response, "Audio sample rate not supported by engine")
+
+    # 22. Transcript Detail: Cross-tournament access returns 404
+    def test_transcript_detail_cross_tournament_404(self):
+        recording_other = SpeechRecording.objects.create(
+            debate=self.other_debate,
+            audio_file=self._create_audio_file("other_rec.wav"),
+            status=SpeechRecording.Status.COMPLETED,
+        )
+        detail_url = reverse('speech-transcript-detail', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording_other.id,
+        })
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 404)
+
+    # 23. Transcript Detail: Unauthorized access denied
+    def test_transcript_detail_unauthorized_denied(self):
+        recording = SpeechRecording.objects.create(
+            debate=self.debate,
+            audio_file=self._create_audio_file("auth_rec.wav"),
+            status=SpeechRecording.Status.COMPLETED,
+        )
+        detail_url = reverse('speech-transcript-detail', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+
+        # Unauthenticated -> redirect to login
+        self.client.logout()
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/accounts/login/', response.url)
+
+        # Authenticated non-admin -> 403
+        non_admin = User.objects.create_user(username="detail_non_admin", password="password")
+        self.client.force_login(non_admin)
+        response_non_admin = self.client.get(detail_url)
+        self.assertEqual(response_non_admin.status_code, 403)
+
+    # 24. Audio Streaming Endpoint: Requires admin permission, respects scoping, streams audio
+    def test_audio_stream_view(self):
+        recording = SpeechRecording.objects.create(
+            debate=self.debate,
+            audio_file=self._create_audio_file("stream_test.wav"),
+            status=SpeechRecording.Status.COMPLETED,
+        )
+        audio_url = reverse('speech-recording-audio', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+
+        # Admin user gets file stream
+        response = self.client.get(audio_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('audio', response['Content-Type'])
+        # Consume streaming content
+        content = b"".join(response.streaming_content)
+        self.assertGreater(len(content), 0)
+
+        # Cross-tournament access returns 404
+        cross_url = reverse('speech-recording-audio', kwargs={
+            'tournament_slug': self.other_tournament.slug,
+            'recording_id': recording.id,
+        })
+        response_cross = self.client.get(cross_url)
+        self.assertEqual(response_cross.status_code, 404)
+
+        # Unauthenticated -> redirect to login
+        self.client.logout()
+        response_anon = self.client.get(audio_url)
+        self.assertEqual(response_anon.status_code, 302)
+
+        # Authenticated non-admin -> 403
+        non_admin = User.objects.create_user(username="audio_stream_non_admin", password="password")
+        self.client.force_login(non_admin)
+        response_non_admin = self.client.get(audio_url)
+        self.assertEqual(response_non_admin.status_code, 403)
