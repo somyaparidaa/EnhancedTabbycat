@@ -140,6 +140,7 @@ TABBYCAT_APPS = (
     'notifications',
     'importer',
     'registration',
+    'speech_analytics',
 )
 
 INSTALLED_APPS = (
