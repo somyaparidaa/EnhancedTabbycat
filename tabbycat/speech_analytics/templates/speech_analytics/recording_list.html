@@ -75,8 +75,14 @@
                       </button>
                     </form>
                   {% elif recording.status == 'F' %}
-                    <a href="{% tournamenturl 'speech-transcript-detail' recording_id=recording.id %}" class="btn btn-sm btn-outline-danger">
-                      <i data-feather="alert-circle"></i> {% trans "View Error" %}
+                    <form method="post" action="{% tournamenturl 'speech-recording-retry' recording_id=recording.id %}" class="d-inline retry-form">
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-sm btn-outline-warning retry-btn" data-recording-id="{{ recording.id }}" title="{% trans "Retry transcription job" %}">
+                        <i data-feather="rotate-cw"></i> {% trans "Retry" %}
+                      </button>
+                    </form>
+                    <a href="{% tournamenturl 'speech-transcript-detail' recording_id=recording.id %}" class="btn btn-sm btn-outline-danger ml-1" title="{{ recording.error_message|default:_("View failure details") }}">
+                      <i data-feather="alert-circle"></i> {% trans "Error" %}
                     </a>
                   {% else %}
                     <span class="text-muted small">{% trans "No transcript" %}</span>
@@ -111,10 +117,10 @@
   <script>
     (function() {
       document.addEventListener('submit', function(e) {
-        var form = e.target.closest('.check-status-form');
+        var form = e.target.closest('.check-status-form, .retry-form');
         if (!form) return;
 
-        var btn = form.querySelector('.check-status-btn');
+        var btn = form.querySelector('.check-status-btn, .retry-btn');
         if (!btn) return;
 
         if (btn.classList.contains('disabled') || btn.disabled) {
@@ -124,7 +130,8 @@
 
         btn.classList.add('disabled');
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> {% trans "Checking..." %}';
+        var loadingText = btn.classList.contains('retry-btn') ? '{% trans "Retrying..." %}' : '{% trans "Checking..." %}';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + loadingText;
       });
     })();
   </script>

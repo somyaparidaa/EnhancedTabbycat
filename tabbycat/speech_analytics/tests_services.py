@@ -245,3 +245,66 @@ class GnaniPrismaBatchClientTests(SimpleTestCase):
             audio_file=("speech.wav", stream, "audio/wav"),
         )
         self.assertEqual(stream.tell(), 0)  # Reset to position 0 before upload
+
+    # 15. Normalize payload with missing/malformed segments, timestamps, and confidence
+    def test_normalize_payload_with_malformed_and_missing_metadata(self):
+        raw_payload = {
+            "transcript": "Overall transcript text.",
+            "language_detected": "hi",
+            "audio_duration": "45.5",
+            "confidence": "0.92",
+            "segments": [
+                {
+                    "start": "1.2",
+                    "end": "3.4",
+                    "text": "Hello world",
+                    "speaker": "Speaker 1",
+                    "confidence": "0.95",
+                    "words": [
+                        {"word": "Hello", "start": "1.2", "end": "2.0", "confidence": "0.98"},
+                        {"word": "world", "start": "2.1", "end": "3.4", "confidence": "0.92"},
+                    ],
+                },
+                {
+                    # Missing timestamps, confidence, speaker
+                    "text": "Second sentence without timing.",
+                },
+                {
+                    # Malformed / invalid numeric values
+                    "start": "invalid-float",
+                    "end": None,
+                    "text": "Third sentence.",
+                    "confidence": "not-a-number",
+                },
+                "non-dict item in list",
+            ],
+        }
+
+        normalized = self.client.normalize_transcript_payload(raw_payload)
+        self.assertEqual(normalized['text'], "Overall transcript text.")
+        self.assertEqual(normalized['language_code'], "hi")
+        self.assertEqual(normalized['duration'], 45.5)
+        self.assertEqual(normalized['overall_confidence'], 0.92)
+
+        segments = normalized['segments']
+        self.assertEqual(len(segments), 3)
+
+        # First segment parsed correctly as floats
+        self.assertEqual(segments[0]['start'], 1.2)
+        self.assertEqual(segments[0]['end'], 3.4)
+        self.assertEqual(segments[0]['confidence'], 0.95)
+        self.assertEqual(segments[0]['speaker'], "Speaker 1")
+        self.assertEqual(len(segments[0]['words']), 2)
+        self.assertEqual(segments[0]['words'][0]['start'], 1.2)
+
+        # Second segment has None for missing optional fields
+        self.assertIsNone(segments[1]['start'])
+        self.assertIsNone(segments[1]['end'])
+        self.assertIsNone(segments[1]['confidence'])
+        self.assertIsNone(segments[1]['speaker'])
+        self.assertIsNone(segments[1]['words'])
+
+        # Third segment converts invalid strings to None without raising exceptions
+        self.assertIsNone(segments[2]['start'])
+        self.assertIsNone(segments[2]['end'])
+        self.assertIsNone(segments[2]['confidence'])

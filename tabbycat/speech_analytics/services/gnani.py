@@ -386,22 +386,65 @@ class GnaniPrismaBatchClient:
             for seg in segments:
                 if not isinstance(seg, dict):
                     continue
+
+                # Safely parse start and end timestamps (float or None)
+                start_val = seg.get('start')
+                end_val = seg.get('end')
+                try:
+                    start_float = float(start_val) if start_val is not None else None
+                except (ValueError, TypeError):
+                    start_float = None
+
+                try:
+                    end_float = float(end_val) if end_val is not None else None
+                except (ValueError, TypeError):
+                    end_float = None
+
+                # Safely parse confidence (float or None)
+                conf_val = seg.get('confidence')
+                try:
+                    conf_float = float(conf_val) if conf_val is not None else None
+                except (ValueError, TypeError):
+                    conf_float = None
+
+                # Normalize words if present
+                normalized_words = None
+                raw_words = seg.get('words')
+                if isinstance(raw_words, list):
+                    normalized_words = []
+                    for w in raw_words:
+                        if not isinstance(w, dict):
+                            continue
+                        w_start = w.get('start')
+                        w_end = w.get('end')
+                        w_conf = w.get('confidence')
+                        try:
+                            w_start_f = float(w_start) if w_start is not None else None
+                        except (ValueError, TypeError):
+                            w_start_f = None
+                        try:
+                            w_end_f = float(w_end) if w_end is not None else None
+                        except (ValueError, TypeError):
+                            w_end_f = None
+                        try:
+                            w_conf_f = float(w_conf) if w_conf is not None else None
+                        except (ValueError, TypeError):
+                            w_conf_f = None
+
+                        normalized_words.append({
+                            'word': str(w.get('word', '') or ''),
+                            'start': w_start_f,
+                            'end': w_end_f,
+                            'confidence': w_conf_f,
+                        })
+
                 normalized_segments.append({
-                    'start': seg.get('start', 0.0),
-                    'end': seg.get('end', 0.0),
-                    'text': seg.get('text', ''),
-                    'speaker': seg.get('speaker'),
-                    'confidence': seg.get('confidence'),
-                    'words': [
-                        {
-                            'word': w.get('word', ''),
-                            'start': w.get('start', 0.0),
-                            'end': w.get('end', 0.0),
-                            'confidence': w.get('confidence'),
-                        }
-                        for w in seg.get('words', [])
-                        if isinstance(w, dict)
-                    ] if 'words' in seg and isinstance(seg['words'], list) else None,
+                    'start': start_float,
+                    'end': end_float,
+                    'text': str(seg.get('text', '') or ''),
+                    'speaker': str(seg.get('speaker')) if seg.get('speaker') is not None else None,
+                    'confidence': conf_float,
+                    'words': normalized_words,
                 })
 
             if not full_text and normalized_segments:
@@ -414,8 +457,17 @@ class GnaniPrismaBatchClient:
             or 'en'
         )
 
-        duration = raw_payload.get('audio_duration') or raw_payload.get('duration')
-        confidence = raw_payload.get('confidence')
+        duration_val = raw_payload.get('audio_duration') or raw_payload.get('duration')
+        try:
+            duration = float(duration_val) if duration_val is not None else None
+        except (ValueError, TypeError):
+            duration = None
+
+        conf_val = raw_payload.get('confidence')
+        try:
+            confidence = float(conf_val) if conf_val is not None else None
+        except (ValueError, TypeError):
+            confidence = None
 
         return {
             'text': full_text.strip(),

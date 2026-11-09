@@ -756,3 +756,142 @@ class SpeechRecordingWorkflowTests(TestCase):
         self.assertEqual(response.status_code, 302)
         # Verify it falls back to internal tournament dashboard rather than redirecting to external site
         self.assertEqual(response.url, dashboard_url)
+
+    # 29. Retry failed recording succeeds and launches new Gnani job
+    @patch('speech_analytics.views.GnaniPrismaBatchClient')
+    def test_retry_failed_recording_success(self, MockClientClass):
+        mock_client = MockClientClass.return_value
+        mock_client.create_batch_job.return_value = {'job_id': 'job_retry_999', 'status': 'CREATED'}
+        mock_client.start_batch_job.return_value = {'job_id': 'job_retry_999', 'status': 'STARTING'}
+
+        recording = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker1,
+            audio_file=self._create_audio_file("failed_retry.wav"),
+            job_id='old_failed_job',
+            status=SpeechRecording.Status.FAILED,
+            error_message="Connection timed out previously",
+        )
+
+        retry_url = reverse('speech-recording-retry', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+
+        response = self.client.post(retry_url, HTTP_REFERER=dashboard_url, HTTP_ACCEPT='text/html', follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertRedirects(response, dashboard_url)
+
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any("restarted" in str(m) for m in messages_list))
+
+        recording.refresh_from_db()
+        self.assertEqual(recording.job_id, 'job_retry_999')
+        self.assertEqual(recording.status, SpeechRecording.Status.PROCESSING)
+        self.assertEqual(recording.error_message, "")
+
+        mock_client.create_batch_job.assert_called_once()
+        mock_client.start_batch_job.assert_called_once_with('job_retry_999')
+
+    # 30. Retry on non-failed recording is rejected
+    @patch('speech_analytics.views.GnaniPrismaBatchClient')
+    def test_retry_non_failed_recording_rejected(self, MockClientClass):
+        mock_client = MockClientClass.return_value
+
+        recording = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker1,
+            audio_file=self._create_audio_file("active.wav"),
+            job_id='active_job',
+            status=SpeechRecording.Status.PROCESSING,
+        )
+
+        retry_url = reverse('speech-recording-retry', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+        response = self.client.post(retry_url, HTTP_ACCEPT='application/json')
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertFalse(data['success'])
+        self.assertIn("Only failed recordings can be retried", data['error'])
+        mock_client.create_batch_job.assert_not_called()
+
+    # 31. Retry cross-tournament access rejected
+    def test_retry_cross_tournament_access_rejected(self):
+        recording = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker1,
+            audio_file=self._create_audio_file("cross_retry.wav"),
+            status=SpeechRecording.Status.FAILED,
+        )
+
+        wrong_url = reverse('speech-recording-retry', kwargs={
+            'tournament_slug': self.other_tournament.slug,
+            'recording_id': recording.id,
+        })
+        response = self.client.post(wrong_url)
+        self.assertEqual(response.status_code, 404)
+
+    # 32. Detail view renders with missing optional metadata (no diarization, no timestamps, no confidence)
+    def test_detail_view_renders_with_incomplete_or_missing_metadata(self):
+        recording = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker1,
+            audio_file=self._create_audio_file("partial.wav"),
+            status=SpeechRecording.Status.COMPLETED,
+        )
+        # Transcript with None metadata and basic text
+        SpeechTranscript.objects.create(
+            recording=recording,
+            text="Raw speech text without any metadata or diarization.",
+            language_code="en",
+            metadata=None,
+        )
+
+        detail_url = reverse('speech-transcript-detail', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Raw speech text without any metadata or diarization.")
+        self.assertNotContains(response, "Speaker Diarization & Segments")
+
+    # 33. Detail view renders diarized segments with malformed/missing fields safely
+    def test_detail_view_renders_malformed_diarization_segments_safely(self):
+        recording = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker1,
+            audio_file=self._create_audio_file("malformed.wav"),
+            status=SpeechRecording.Status.COMPLETED,
+        )
+        malformed_metadata = {
+            'overall_confidence': "invalid-conf",
+            'duration': "not-a-number",
+            'segments': [
+                # Segment without speaker or timestamps
+                {'text': 'First segment with no timestamps.'},
+                # Segment with non-numeric timestamps and non-numeric confidence
+                {'speaker': 'Speaker 2', 'text': 'Second segment.', 'start': 'bad', 'end': 'none', 'confidence': 'null'},
+                # Completely non-dict item in segments list
+                "invalid string segment",
+            ],
+        }
+        SpeechTranscript.objects.create(
+            recording=recording,
+            text="First segment with no timestamps. Second segment.",
+            language_code="en",
+            metadata=malformed_metadata,
+        )
+
+        detail_url = reverse('speech-transcript-detail', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "First segment with no timestamps.")
+        self.assertContains(response, "Second segment.")
+        self.assertContains(response, "Speaker 2")

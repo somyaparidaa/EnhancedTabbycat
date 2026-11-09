@@ -340,6 +340,9 @@ class SpeechTranscriptDetailView(AdministratorMixin, TournamentMixin, DetailView
 
         diarized_segments = []
         transcript_metadata_json = ""
+        overall_confidence = None
+        audio_duration = None
+
         if transcript and transcript.metadata:
             meta = transcript.metadata
             try:
@@ -348,16 +351,202 @@ class SpeechTranscriptDetailView(AdministratorMixin, TournamentMixin, DetailView
                 transcript_metadata_json = str(meta)
 
             if isinstance(meta, dict):
+                # Check for confidence
+                conf = meta.get('overall_confidence') if 'overall_confidence' in meta else meta.get('confidence')
+                try:
+                    overall_confidence = float(conf) if conf is not None else None
+                except (ValueError, TypeError):
+                    overall_confidence = None
+
+                # Check for duration
+                dur = meta.get('duration') if 'duration' in meta else meta.get('audio_duration')
+                try:
+                    audio_duration = float(dur) if dur is not None else None
+                except (ValueError, TypeError):
+                    audio_duration = None
+
                 # Check for standard diarization structures
-                segments = meta.get('diarization') or meta.get('segments') or meta.get('words')
+                segments = meta.get('segments') or meta.get('diarization') or meta.get('sentences') or meta.get('words')
                 if isinstance(segments, list):
                     for item in segments:
                         if isinstance(item, dict) and ('speaker' in item or 'text' in item):
-                            diarized_segments.append(item)
+                            start_v = item.get('start')
+                            end_v = item.get('end')
+                            conf_v = item.get('confidence')
+                            try:
+                                s_float = float(start_v) if start_v is not None else None
+                            except (ValueError, TypeError):
+                                s_float = None
+                            try:
+                                e_float = float(end_v) if end_v is not None else None
+                            except (ValueError, TypeError):
+                                e_float = None
+                            try:
+                                c_float = float(conf_v) if conf_v is not None else None
+                            except (ValueError, TypeError):
+                                c_float = None
+
+                            diarized_segments.append({
+                                'speaker': item.get('speaker'),
+                                'text': str(item.get('text', '') or ''),
+                                'start': s_float,
+                                'end': e_float,
+                                'confidence': c_float,
+                            })
 
         context['diarized_segments'] = diarized_segments
         context['transcript_metadata_json'] = transcript_metadata_json
+        context['overall_confidence'] = overall_confidence
+        context['audio_duration'] = audio_duration
         return context
+
+
+class SpeechRecordingRetryView(AdministratorMixin, TournamentMixin, View):
+    """Endpoint to safely retry transcription for a FAILED recording.
+    Creates a new Gnani batch job using the existing audio file, preserving
+    the SpeechRecording record and any existing transcript unless overwritten upon completion.
+    Strictly accepts POST with CSRF protection and enforces tournament-level isolation.
+    """
+
+    def _is_html_request(self):
+        accept = self.request.headers.get('accept', '')
+        return ('text/html' in accept and 'application/json' not in accept) or (self.request.GET.get('format') == 'html')
+
+    def _redirect_html(self, request, msg, level=messages.INFO):
+        if level == messages.SUCCESS:
+            messages.success(request, msg)
+        elif level == messages.WARNING:
+            messages.warning(request, msg)
+        elif level == messages.ERROR:
+            messages.error(request, msg)
+        else:
+            messages.info(request, msg)
+
+        referer = request.META.get('HTTP_REFERER')
+        if referer and url_has_allowed_host_and_scheme(
+            url=referer,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            return HttpResponseRedirect(referer)
+
+        return HttpResponseRedirect(reverse_tournament('speech-analytics-dashboard', self.tournament))
+
+    def post(self, request, *args, **kwargs):
+        recording_id = self.kwargs.get('recording_id')
+
+        # Retrieve recording strictly scoped to current tournament
+        recording = get_object_or_404(
+            SpeechRecording.objects.select_related('debate__round__tournament'),
+            pk=recording_id,
+            debate__round__tournament=self.tournament,
+        )
+
+        is_html = self._is_html_request()
+
+        # Concurrency & Idempotency check: Lock row and ensure it is currently FAILED
+        with transaction.atomic():
+            locked_rec = SpeechRecording.objects.select_for_update().get(pk=recording.pk)
+
+            # Prevent retrying non-failed recordings (e.g. PROCESSING, PENDING, COMPLETED)
+            if locked_rec.status != SpeechRecording.Status.FAILED:
+                msg = _("Only failed recordings can be retried. Current status is %(status)s.") % {
+                    'status': locked_rec.get_status_display()
+                }
+                if is_html:
+                    return self._redirect_html(request, msg, messages.WARNING)
+                return JsonResponse({
+                    'success': False,
+                    'recording_id': locked_rec.id,
+                    'status': locked_rec.status,
+                    'error': msg,
+                }, status=400)
+
+            if not locked_rec.audio_file:
+                msg = _("Cannot retry: No audio file is associated with this recording.")
+                if is_html:
+                    return self._redirect_html(request, msg, messages.ERROR)
+                return JsonResponse({
+                    'success': False,
+                    'recording_id': locked_rec.id,
+                    'status': locked_rec.status,
+                    'error': msg,
+                }, status=400)
+
+            # Transition to PENDING while initiating retry
+            locked_rec.status = SpeechRecording.Status.PENDING
+            locked_rec.error_message = ""
+            locked_rec.save(update_fields=['status', 'error_message', 'updated_at'])
+            recording = locked_rec
+
+        # Outside row lock / transaction, submit new batch job to Gnani API
+        try:
+            client = GnaniPrismaBatchClient()
+            job_info = client.create_batch_job(
+                audio_file=recording.audio_file.file,
+                language_code="en-IN",
+                model="prisma-v2.5",
+            )
+            new_job_id = job_info.get('job_id')
+            if not new_job_id:
+                raise GnaniSTTError("No job_id returned by Gnani API on retry creation.")
+
+            # Record new job ID
+            recording.job_id = str(new_job_id)
+            recording.error_message = ""
+            recording.save(update_fields=['job_id', 'error_message', 'updated_at'])
+
+            # Start execution of the new job
+            client.start_batch_job(recording.job_id)
+            recording.status = SpeechRecording.Status.PROCESSING
+            recording.save(update_fields=['status', 'updated_at'])
+
+        except GnaniSTTError as exc:
+            logger.warning("Retry submission failed for recording #%s: %s", recording.pk, exc.message)
+            recording.status = SpeechRecording.Status.FAILED
+            recording.error_message = exc.message
+            recording.save(update_fields=['status', 'error_message', 'updated_at'])
+            if is_html:
+                return self._redirect_html(
+                    request,
+                    _("Failed to retry transcription: %(error)s") % {'error': recording.error_message},
+                    messages.ERROR,
+                )
+            return JsonResponse({
+                'success': False,
+                'recording_id': recording.id,
+                'status': recording.status,
+                'error': recording.error_message,
+            }, status=502)
+
+        except Exception as exc:
+            logger.exception("Unexpected error during transcription retry for #%s", recording.pk)
+            recording.status = SpeechRecording.Status.FAILED
+            recording.error_message = _("An internal error occurred while retrying transcription.")
+            recording.save(update_fields=['status', 'error_message', 'updated_at'])
+            if is_html:
+                return self._redirect_html(request, recording.error_message, messages.ERROR)
+            return JsonResponse({
+                'success': False,
+                'recording_id': recording.id,
+                'status': recording.status,
+                'error': recording.error_message,
+            }, status=500)
+
+        # Successful retry submission
+        if is_html:
+            return self._redirect_html(
+                request,
+                _("Transcription job has been successfully restarted!"),
+                messages.SUCCESS,
+            )
+
+        return JsonResponse({
+            'success': True,
+            'recording_id': recording.id,
+            'status': recording.status,
+            'error': None,
+        }, status=200)
 
 
 class SpeechRecordingAudioStreamView(AdministratorMixin, TournamentMixin, View):
