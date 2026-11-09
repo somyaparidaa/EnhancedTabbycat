@@ -36,11 +36,13 @@ class SpeechRecordingUploadForm(forms.ModelForm):
         # Restrict debates and speakers strictly to the current tournament
         self.fields['debate'].queryset = Debate.objects.filter(
             round__tournament=self.tournament
-        ).select_related('round', 'venue')
+        ).select_related('round', 'venue').prefetch_related('debateteam_set__team')
+        self.fields['debate'].label_from_instance = lambda obj: f"[{obj.round.abbreviation}] {obj.matchup}"
 
         self.fields['speaker'].queryset = Speaker.objects.filter(
             team__tournament=self.tournament
         ).select_related('team')
+        self.fields['speaker'].label_from_instance = lambda obj: f"{obj.name} ({obj.team.short_name})"
         self.fields['speaker'].required = False
 
     def clean_audio_file(self):

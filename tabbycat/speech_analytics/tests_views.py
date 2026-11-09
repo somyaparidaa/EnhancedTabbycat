@@ -52,6 +52,7 @@ class SpeechRecordingWorkflowTests(TestCase):
         return SimpleUploadedFile(name, content, content_type=content_type)
 
     # 1. Successful upload & submission workflow
+    # 1. Upload and transcription submission via JSON request
     @patch('speech_analytics.views.GnaniPrismaBatchClient')
     def test_upload_and_transcription_submission_success(self, MockClientClass):
         mock_client = MockClientClass.return_value
@@ -61,11 +62,15 @@ class SpeechRecordingWorkflowTests(TestCase):
         upload_url = reverse('speech-recording-upload', kwargs={'tournament_slug': self.tournament.slug})
         audio_file = self._create_audio_file()
 
-        response = self.client.post(upload_url, {
-            'debate': self.debate.id,
-            'speaker': self.speaker1.id,
-            'audio_file': audio_file,
-        })
+        response = self.client.post(
+            upload_url,
+            {
+                'debate': self.debate.id,
+                'speaker': self.speaker1.id,
+                'audio_file': audio_file,
+            },
+            HTTP_ACCEPT='application/json',
+        )
 
         self.assertEqual(response.status_code, 201)
         data = response.json()
@@ -90,11 +95,15 @@ class SpeechRecordingWorkflowTests(TestCase):
         upload_url = reverse('speech-recording-upload', kwargs={'tournament_slug': self.tournament.slug})
         audio_file = self._create_audio_file()
 
-        response = self.client.post(upload_url, {
-            'debate': self.debate.id,
-            'speaker': self.speaker1.id,
-            'audio_file': audio_file,
-        })
+        response = self.client.post(
+            upload_url,
+            {
+                'debate': self.debate.id,
+                'speaker': self.speaker1.id,
+                'audio_file': audio_file,
+            },
+            HTTP_ACCEPT='application/json',
+        )
 
         self.assertEqual(response.status_code, 502)
         recording = SpeechRecording.objects.get(debate=self.debate, speaker=self.speaker1)
@@ -109,21 +118,29 @@ class SpeechRecordingWorkflowTests(TestCase):
 
         # Disallowed extension (.txt)
         bad_ext_file = SimpleUploadedFile("speech.txt", b"plain text content", content_type="text/plain")
-        response = self.client.post(upload_url, {
-            'debate': self.debate.id,
-            'speaker': self.speaker1.id,
-            'audio_file': bad_ext_file,
-        })
+        response = self.client.post(
+            upload_url,
+            {
+                'debate': self.debate.id,
+                'speaker': self.speaker1.id,
+                'audio_file': bad_ext_file,
+            },
+            HTTP_ACCEPT='application/json',
+        )
         self.assertEqual(response.status_code, 400)
         self.assertIn('audio_file', response.json()['errors'])
 
         # Allowed extension but invalid binary signature (fake wav)
         fake_wav_file = SimpleUploadedFile("speech.wav", b"NOT_A_REAL_AUDIO_FILE", content_type="audio/wav")
-        response = self.client.post(upload_url, {
-            'debate': self.debate.id,
-            'speaker': self.speaker1.id,
-            'audio_file': fake_wav_file,
-        })
+        response = self.client.post(
+            upload_url,
+            {
+                'debate': self.debate.id,
+                'speaker': self.speaker1.id,
+                'audio_file': fake_wav_file,
+            },
+            HTTP_ACCEPT='application/json',
+        )
         self.assertEqual(response.status_code, 400)
         self.assertIn('audio_file', response.json()['errors'])
 
@@ -368,3 +385,100 @@ class SpeechRecordingWorkflowTests(TestCase):
         dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
         response = self.client.get(dashboard_url)
         self.assertEqual(response.status_code, 403)
+
+    # 15. GET upload page renders successfully for tournament admin
+    def test_upload_page_get_renders_successfully(self):
+        upload_url = reverse('speech-recording-upload', kwargs={'tournament_slug': self.tournament.slug})
+        response = self.client.get(upload_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'speech_analytics/recording_upload.html')
+
+        # Form fields present
+        self.assertIn('form', response.context)
+        form = response.context['form']
+        self.assertIn('debate', form.fields)
+        self.assertIn('speaker', form.fields)
+        self.assertIn('audio_file', form.fields)
+
+        # Content assertions
+        content = response.content.decode('utf-8')
+        self.assertIn('name="csrfmiddlewaretoken"', content)
+        self.assertIn('enctype="multipart/form-data"', content)
+        self.assertIn('Supported Formats', content)
+        self.assertIn('Maximum File Size', content)
+        self.assertIn('Cancel and return to dashboard', content)
+
+    # 16. Unauthenticated and non-admin access to upload page denied
+    def test_upload_page_unauthorized_denied(self):
+        upload_url = reverse('speech-recording-upload', kwargs={'tournament_slug': self.tournament.slug})
+
+        # Unauthenticated -> redirect to login
+        self.client.logout()
+        response = self.client.get(upload_url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/accounts/login/', response.url)
+
+        # Authenticated non-admin -> 403
+        non_admin = User.objects.create_user(username="upload_regular_user", password="password")
+        self.client.force_login(non_admin)
+        response = self.client.get(upload_url)
+        self.assertEqual(response.status_code, 403)
+
+    # 17. Successful HTML form submission redirects to dashboard with success message
+    @patch('speech_analytics.views.GnaniPrismaBatchClient')
+    def test_upload_form_post_success_redirects_to_dashboard(self, MockClientClass):
+        mock_client = MockClientClass.return_value
+        mock_client.create_batch_job.return_value = {'job_id': 'gnani_job_html_123', 'status': 'CREATED'}
+        mock_client.start_batch_job.return_value = {'job_id': 'gnani_job_html_123', 'status': 'STARTING'}
+
+        upload_url = reverse('speech-recording-upload', kwargs={'tournament_slug': self.tournament.slug})
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+        audio_file = self._create_audio_file("html_upload.wav")
+
+        response = self.client.post(
+            upload_url,
+            {
+                'debate': self.debate.id,
+                'speaker': self.speaker1.id,
+                'audio_file': audio_file,
+            },
+            follow=True,
+        )
+
+        self.assertRedirects(response, dashboard_url)
+        # Verify success message displayed
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any("uploaded successfully" in str(m) for m in messages_list))
+
+        # Verify job was recorded and started
+        recording = SpeechRecording.objects.get(debate=self.debate, speaker=self.speaker1)
+        self.assertEqual(recording.job_id, 'gnani_job_html_123')
+        self.assertEqual(recording.status, SpeechRecording.Status.PROCESSING)
+        # Verify job_id is NOT in the rendered HTML
+        self.assertNotIn('gnani_job_html_123', response.content.decode('utf-8'))
+        mock_client.create_batch_job.assert_called_once()
+        mock_client.start_batch_job.assert_called_once_with('gnani_job_html_123')
+
+    # 18. Invalid HTML form submission renders errors and preserves form context
+    def test_upload_form_post_invalid_renders_errors(self):
+        upload_url = reverse('speech-recording-upload', kwargs={'tournament_slug': self.tournament.slug})
+        bad_file = SimpleUploadedFile("speech.txt", b"plain text content", content_type="text/plain")
+
+        response = self.client.post(
+            upload_url,
+            {
+                'debate': self.debate.id,
+                'speaker': self.speaker1.id,
+                'audio_file': bad_file,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'speech_analytics/recording_upload.html')
+        self.assertIn('form', response.context)
+        form = response.context['form']
+        self.assertTrue(form.errors)
+        self.assertIn('audio_file', form.errors)
+        # Context preserved
+        self.assertEqual(form.data.get('speaker'), str(self.speaker1.id))
+        self.assertContains(response, "Please correct the errors indicated below.")

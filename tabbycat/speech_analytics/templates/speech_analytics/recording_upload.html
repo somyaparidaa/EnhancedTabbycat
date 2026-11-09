@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% load add_field_css debate_tags i18n %}
+
+{% block head-title %}<span class="emoji">🎙️</span> {% trans "Upload Speech Recording" %}{% endblock %}
+{% block page-title %}{% trans "Upload Speech Recording" %}{% endblock %}
+{% block page-subtitle %}{% blocktrans trimmed with tournament=tournament.short_name %}for {{ tournament }}{% endblocktrans %}{% endblock %}
+
+{% block page-subnav-sections %}
+  <a class="btn btn-outline-primary" href="{% tournamenturl 'speech-analytics-dashboard' %}">
+    <i data-feather="chevron-left"></i> {% trans "Back to Speech Analytics" %}
+  </a>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-lg-8 col-md-10 col-12 mx-auto">
+
+    <div class="card mb-4 border-info">
+      <div class="card-body bg-light">
+        <h6 class="card-title text-info mb-2">
+          <i data-feather="info"></i> {% trans "Audio Upload Guidelines" %}
+        </h6>
+        <ul class="mb-0 small text-muted">
+          <li><strong>{% trans "Supported Formats" %}:</strong> {{ allowed_extensions_display }}</li>
+          <li><strong>{% trans "Maximum File Size" %}:</strong> {{ max_upload_size_mb }} MB</li>
+          <li>{% trans "Select the debate matchup, and optionally specify which speaker is speaking in this recording." %}</li>
+        </ul>
+      </div>
+    </div>
+
+    <form id="speech-recording-upload-form" action="" method="POST" enctype="multipart/form-data">
+      {% csrf_token %}
+      <div class="card">
+        <div class="list-group list-group-flush">
+
+          <div class="list-group-item pt-3 pb-4">
+            {% if form.errors %}
+              {% include "components/form-errors.html" with errors=form.non_field_errors %}
+            {% endif %}
+
+            {% for field in form.visible_fields %}
+              {% include "components/form-field.html" %}
+            {% endfor %}
+
+            <div hidden>
+              {% for field in form.hidden_fields %}
+                {{ field }}
+              {% endfor %}
+            </div>
+
+            <!-- Upload Progress Bar (hidden until submission) -->
+            <div id="upload-progress-container" class="mt-3" style="display: none;">
+              <label class="small text-muted font-weight-bold" id="upload-progress-status">
+                {% trans "Uploading recording..." %}
+              </label>
+              <div class="progress mb-2" style="height: 18px;">
+                <div id="upload-progress-bar"
+                     class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                     role="progressbar"
+                     style="width: 0%;"
+                     aria-valuenow="0"
+                     aria-valuemin="0"
+                     aria-valuemax="100">0%</div>
+              </div>
+              <small class="text-muted" id="upload-progress-subtext">
+                {% trans "Please keep this tab open while your file uploads and the transcription job initializes." %}
+              </small>
+            </div>
+          </div>
+
+          <div class="list-group-item pt-4 pb-2">
+            <button type="submit" id="btn-submit-upload" class="btn btn-block btn-success mb-3">
+              <i data-feather="upload-cloud"></i> {% trans "Upload & Start Transcription" %}
+            </button>
+            <div class="text-center pb-2 small text-muted">
+              <a href="{% tournamenturl 'speech-analytics-dashboard' %}">
+                {% trans "Cancel and return to dashboard" %}
+              </a>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </form>
+
+  </div>
+</div>
+{% endblock content %}
+
+{% block js %}
+  {{ block.super }}
+  <script>
+    (function() {
+      var form = document.getElementById('speech-recording-upload-form');
+      var submitBtn = document.getElementById('btn-submit-upload');
+      var progressContainer = document.getElementById('upload-progress-container');
+      var progressBar = document.getElementById('upload-progress-bar');
+      var progressStatus = document.getElementById('upload-progress-status');
+
+      if (!form) return;
+
+      form.addEventListener('submit', function(e) {
+        var fileInput = form.querySelector('input[type="file"]');
+        if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+          return; // Let standard browser/django validation handle missing file
+        }
+
+        // Show progress UI and disable submit button to prevent double-submission
+        if (progressContainer) {
+          progressContainer.style.display = 'block';
+        }
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.innerHTML = '{% trans "Uploading..." %}';
+        }
+      });
+    })();
+  </script>
+{% endblock js %}

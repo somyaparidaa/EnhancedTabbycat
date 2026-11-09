@@ -1,12 +1,15 @@
 import logging
+from django.conf import settings
+from django.contrib import messages
 from django.db import transaction
-from django.http import Http404, JsonResponse
+from django.http import Http404, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils.translation import gettext as _, gettext_lazy as _lazy
 from django.views.generic import ListView, View
 from django.views.generic.edit import FormView
 
 from tournaments.mixins import TournamentMixin
+from utils.misc import reverse_tournament
 from utils.mixins import AdministratorMixin
 
 from .forms import SpeechRecordingUploadForm
@@ -43,12 +46,33 @@ class SpeechRecordingUploadView(AdministratorMixin, TournamentMixin, FormView):
     """View to handle authenticated debate audio uploads and submit batch transcription jobs."""
 
     form_class = SpeechRecordingUploadForm
+    template_name = 'speech_analytics/recording_upload.html'
     page_title = _lazy("Upload Speech Recording")
+    page_emoji = "🎙️"
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         kwargs['tournament'] = self.tournament
         return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        max_size = getattr(settings, 'SPEECH_ANALYTICS_MAX_UPLOAD_SIZE', 100 * 1024 * 1024)
+        context['max_upload_size_mb'] = max_size // (1024 * 1024)
+        allowed_exts = getattr(
+            settings,
+            'SPEECH_ANALYTICS_ALLOWED_EXTENSIONS',
+            ('.wav', '.mp3', '.m4a', '.ogg', '.flac', '.aac'),
+        )
+        context['allowed_extensions_display'] = ', '.join(allowed_exts)
+        return context
+
+    def get_success_url(self):
+        return reverse_tournament('speech-analytics-dashboard', self.tournament)
+
+    def _is_json_request(self):
+        accept_header = self.request.headers.get('accept', '')
+        return ('application/json' in accept_header) or (self.request.content_type == 'application/json')
 
     def form_valid(self, form):
         recording = form.save(commit=False)
@@ -82,37 +106,60 @@ class SpeechRecordingUploadView(AdministratorMixin, TournamentMixin, FormView):
             recording.status = SpeechRecording.Status.FAILED
             recording.error_message = exc.message
             recording.save(update_fields=['status', 'error_message', 'updated_at'])
-            return JsonResponse({
-                'success': False,
-                'recording_id': recording.id,
-                'status': recording.status,
-                'error': recording.error_message,
-            }, status=502)
+            if self._is_json_request():
+                return JsonResponse({
+                    'success': False,
+                    'recording_id': recording.id,
+                    'status': recording.status,
+                    'error': recording.error_message,
+                }, status=502)
+            messages.error(
+                self.request,
+                _("Recording uploaded, but initiating transcription failed: %(error)s") % {'error': recording.error_message},
+            )
+            return self.render_to_response(self.get_context_data(form=form))
         except Exception as exc:
             logger.exception("Unexpected error during speech recording submission for #%s", recording.pk)
             recording.status = SpeechRecording.Status.FAILED
             recording.error_message = _("An internal error occurred while submitting audio for transcription.")
             recording.save(update_fields=['status', 'error_message', 'updated_at'])
+            if self._is_json_request():
+                return JsonResponse({
+                    'success': False,
+                    'recording_id': recording.id,
+                    'status': recording.status,
+                    'error': recording.error_message,
+                }, status=500)
+            messages.error(self.request, recording.error_message)
+            return self.render_to_response(self.get_context_data(form=form))
+
+        # Successful submission
+        if self._is_json_request():
+            # Do not expose internal provider job_id to client
             return JsonResponse({
-                'success': False,
+                'success': True,
                 'recording_id': recording.id,
                 'status': recording.status,
-                'error': recording.error_message,
-            }, status=500)
+                'error': None,
+            }, status=201)
 
-        # Do not expose internal provider job_id to client
-        return JsonResponse({
-            'success': True,
-            'recording_id': recording.id,
-            'status': recording.status,
-            'error': None,
-        }, status=201)
+        messages.success(
+            self.request,
+            _("Audio recording uploaded successfully! Transcription has started."),
+        )
+        return HttpResponseRedirect(self.get_success_url())
 
     def form_invalid(self, form):
-        return JsonResponse({
-            'success': False,
-            'errors': form.errors,
-        }, status=400)
+        if self._is_json_request():
+            return JsonResponse({
+                'success': False,
+                'errors': form.errors,
+            }, status=400)
+        messages.error(
+            self.request,
+            _("Please correct the errors indicated below."),
+        )
+        return self.render_to_response(self.get_context_data(form=form))
 
 
 class SpeechRecordingStatusCheckView(AdministratorMixin, TournamentMixin, View):
