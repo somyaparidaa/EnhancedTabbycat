@@ -275,3 +275,96 @@ class SpeechRecordingWorkflowTests(TestCase):
         # Tabbycat AdministratorMixin redirects unauthenticated users to login
         self.assertEqual(response.status_code, 302)
         self.assertIn('/accounts/login/', response.url)
+
+    # 10. Dashboard loads for authorized administrator
+    def test_dashboard_loads_for_administrator(self):
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+        response = self.client.get(dashboard_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'speech_analytics/recording_list.html')
+        self.assertIn('recordings', response.context)
+
+    # 11. Dashboard shows only recordings for the current tournament and renders all 4 statuses
+    def test_dashboard_filters_by_tournament_and_renders_statuses(self):
+        # 4 recordings with different statuses for current tournament
+        rec_pending = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker1,
+            audio_file=self._create_audio_file("pending.wav"),
+            status=SpeechRecording.Status.PENDING,
+        )
+        rec_proc = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker2,
+            audio_file=self._create_audio_file("proc.wav"),
+            status=SpeechRecording.Status.PROCESSING,
+        )
+        rec_comp = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker1,
+            audio_file=self._create_audio_file("comp.wav"),
+            status=SpeechRecording.Status.COMPLETED,
+        )
+        SpeechTranscript.objects.create(
+            recording=rec_comp,
+            text="Completed debate speech.",
+            language_code="en",
+        )
+        rec_failed = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker2,
+            audio_file=self._create_audio_file("failed.wav"),
+            status=SpeechRecording.Status.FAILED,
+            error_message="Provider timeout",
+        )
+
+        # Recording for another tournament
+        rec_other = SpeechRecording.objects.create(
+            debate=self.other_debate,
+            audio_file=self._create_audio_file("other.wav"),
+            status=SpeechRecording.Status.COMPLETED,
+        )
+
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+        response = self.client.get(dashboard_url)
+        self.assertEqual(response.status_code, 200)
+
+        rendered_recordings = list(response.context['recordings'])
+        self.assertEqual(len(rendered_recordings), 4)
+        self.assertIn(rec_pending, rendered_recordings)
+        self.assertIn(rec_proc, rendered_recordings)
+        self.assertIn(rec_comp, rendered_recordings)
+        self.assertIn(rec_failed, rendered_recordings)
+        self.assertNotIn(rec_other, rendered_recordings)
+
+        # HTML content check for badges and links
+        content = response.content.decode('utf-8')
+        self.assertIn("Pending", content)
+        self.assertIn("Processing", content)
+        self.assertIn("Completed", content)
+        self.assertIn("Failed", content)
+        self.assertIn("Transcript ready", content)
+
+    # 12. Dashboard empty state renders when no recordings exist
+    def test_dashboard_empty_state(self):
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+        response = self.client.get(dashboard_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No speech recordings uploaded yet")
+        self.assertContains(response, "Upload First Recording")
+
+    # 13. Unauthenticated access to dashboard denied
+    def test_dashboard_unauthenticated_denied(self):
+        self.client.logout()
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+        response = self.client.get(dashboard_url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/accounts/login/', response.url)
+
+    # 14. Authenticated non-admin access to dashboard denied
+    def test_dashboard_non_admin_authenticated_denied(self):
+        non_admin = User.objects.create_user(username="regular_user", password="password")
+        self.client.force_login(non_admin)
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+        response = self.client.get(dashboard_url)
+        self.assertEqual(response.status_code, 403)

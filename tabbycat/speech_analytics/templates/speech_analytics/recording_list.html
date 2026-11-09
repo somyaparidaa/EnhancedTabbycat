@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% load i18n debate_tags %}
+
+{% block page-title %}{% trans "Speech Analytics" %}{% endblock %}
+
+{% block page-subnav-actions %}
+  <a href="{% tournamenturl 'speech-recording-upload' %}" class="btn btn-success">
+    <i data-feather="upload"></i> {% trans "Upload Recording" %}
+  </a>
+{% endblock page-subnav-actions %}
+
+{% block content %}
+<div class="row">
+  <div class="col-12">
+
+    {% if recordings %}
+      <div class="table-responsive">
+        <table class="table table-hover table-striped">
+          <thead class="thead-light">
+            <tr>
+              <th>{% trans "Debate" %}</th>
+              <th>{% trans "Speaker" %}</th>
+              <th>{% trans "Audio File" %}</th>
+              <th>{% trans "Uploaded" %}</th>
+              <th>{% trans "Status" %}</th>
+              <th class="text-right">{% trans "Actions" %}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for recording in recordings %}
+              <tr>
+                <td>
+                  <strong>{{ recording.debate.round.abbreviation }}</strong>:
+                  {{ recording.debate.matchup }}
+                </td>
+                <td>
+                  {% if recording.speaker %}
+                    {{ recording.speaker.name }}
+                    <small class="text-muted">({{ recording.speaker.team.short_name }})</small>
+                  {% else %}
+                    <span class="text-muted italic">{% trans "Unassigned" %}</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <code>{{ recording.audio_file.name|slice:"-30:" }}</code>
+                </td>
+                <td>
+                  {{ recording.created_at|date:"SHORT_DATETIME_FORMAT" }}
+                </td>
+                <td>
+                  {% if recording.status == 'P' %}
+                    <span class="badge badge-warning">{% trans "Pending" %}</span>
+                  {% elif recording.status == 'R' %}
+                    <span class="badge badge-info">{% trans "Processing" %}</span>
+                  {% elif recording.status == 'C' %}
+                    <span class="badge badge-success">{% trans "Completed" %}</span>
+                  {% elif recording.status == 'F' %}
+                    <span class="badge badge-danger" title="{{ recording.error_message }}">
+                      {% trans "Failed" %}
+                    </span>
+                  {% else %}
+                    <span class="badge badge-secondary">{{ recording.get_status_display }}</span>
+                  {% endif %}
+                </td>
+                <td class="text-right">
+                  {% if recording.status == 'C' and recording.transcript %}
+                    <span class="badge badge-success">
+                      <i data-feather="check-circle"></i> {% trans "Transcript ready" %}
+                    </span>
+                  {% else %}
+                    <span class="text-muted small">{% trans "No transcript" %}</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="card my-4 text-center py-5">
+        <div class="card-body">
+          <div class="mb-3 text-muted display-4">🎙️</div>
+          <h4 class="card-title">{% trans "No speech recordings uploaded yet" %}</h4>
+          <p class="card-text text-muted max-w-lg mx-auto">
+            {% trans "Upload audio recordings of speeches or debates to transcribe them automatically using Gnani Prisma speech-to-text." %}
+          </p>
+          <a href="{% tournamenturl 'speech-recording-upload' %}" class="btn btn-primary mt-2">
+            <i data-feather="upload"></i> {% trans "Upload First Recording" %}
+          </a>
+        </div>
+      </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock content %}

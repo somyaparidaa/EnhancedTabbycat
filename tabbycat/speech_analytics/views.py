@@ -2,8 +2,8 @@ import logging
 from django.db import transaction
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
-from django.utils.translation import gettext as _
-from django.views.generic import View
+from django.utils.translation import gettext as _, gettext_lazy as _lazy
+from django.views.generic import ListView, View
 from django.views.generic.edit import FormView
 
 from tournaments.mixins import TournamentMixin
@@ -17,11 +17,33 @@ from .services.gnani import GnaniPrismaBatchClient
 logger = logging.getLogger(__name__)
 
 
+class SpeechAnalyticsDashboardView(AdministratorMixin, TournamentMixin, ListView):
+    """Dashboard view listing debate audio recordings and their transcription status."""
+
+    model = SpeechRecording
+    template_name = 'speech_analytics/recording_list.html'
+    context_object_name = 'recordings'
+    page_title = _lazy("Speech Analytics")
+    page_emoji = "🎙️"
+
+    def get_queryset(self):
+        return SpeechRecording.objects.filter(
+            debate__round__tournament=self.tournament
+        ).select_related(
+            'debate__round__tournament',
+            'debate__venue',
+            'speaker__team',
+        ).prefetch_related(
+            'transcript',
+            'debate__debateteam_set__team',
+        ).order_by('-created_at')
+
+
 class SpeechRecordingUploadView(AdministratorMixin, TournamentMixin, FormView):
     """View to handle authenticated debate audio uploads and submit batch transcription jobs."""
 
     form_class = SpeechRecordingUploadForm
-    page_title = _("Upload Speech Recording")
+    page_title = _lazy("Upload Speech Recording")
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()

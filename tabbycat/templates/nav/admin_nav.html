@@ -114,6 +114,14 @@
   {% endif %}
 
   <div class="list-group-item d-inline-block">
+    <a href="{% tournamenturl 'speech-analytics-dashboard' %}" data-parent="#sidebar"
+       class="collapsed">
+      <i data-feather="mic"></i>
+      <span class="d-none d-md-inline">{% trans "Speech Analytics" %}</span>
+    </a>
+  </div>
+
+  <div class="list-group-item d-inline-block">
     <a href="#registrationh" data-toggle="collapse" data-parent="#sidebar" aria-expanded="false">
        <i data-feather="pen-tool"></i>
        <span class="d-none d-md-inline">{% trans "Registration" %}</span>
