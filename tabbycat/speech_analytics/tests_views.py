@@ -895,3 +895,159 @@ class SpeechRecordingWorkflowTests(TestCase):
         self.assertContains(response, "First segment with no timestamps.")
         self.assertContains(response, "Second segment.")
         self.assertContains(response, "Speaker 2")
+
+    # 34. Complete End-to-End Workflow: Upload -> Job Start -> Polling In-Progress -> Completion -> Transcript Display
+    @patch('speech_analytics.views.GnaniPrismaBatchClient')
+    def test_complete_end_to_end_transcription_workflow(self, MockClientClass):
+        mock_client = MockClientClass.return_value
+        mock_client.create_batch_job.return_value = {'job_id': 'e2e_job_101', 'status': 'CREATED'}
+        mock_client.start_batch_job.return_value = {'job_id': 'e2e_job_101', 'status': 'STARTING'}
+
+        upload_url = reverse('speech-recording-upload', kwargs={'tournament_slug': self.tournament.slug})
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+
+        # Step 1: Administrator uploads audio file through the web interface
+        audio = self._create_audio_file("e2e_speech.wav")
+        response = self.client.post(
+            upload_url,
+            {
+                'debate': self.debate.id,
+                'speaker': self.speaker1.id,
+                'audio_file': audio,
+            },
+            HTTP_REFERER=dashboard_url,
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertRedirects(response, dashboard_url)
+
+        # Verify SpeechRecording was created, assigned job ID, and marked PROCESSING
+        recording = SpeechRecording.objects.get(debate=self.debate, speaker=self.speaker1)
+        self.assertEqual(recording.job_id, 'e2e_job_101')
+        self.assertEqual(recording.status, SpeechRecording.Status.PROCESSING)
+        self.assertFalse(SpeechTranscript.objects.filter(recording=recording).exists())
+
+        # Step 2: Dashboard renders the recording with "Check Status" action
+        self.assertContains(response, "Check Status")
+        status_url = reverse('speech-recording-status', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+        self.assertContains(response, status_url)
+
+        # Step 3: Check Status while job is still IN_PROGRESS
+        mock_client.get_job_status.return_value = {'job_id': 'e2e_job_101', 'status': 'IN_PROGRESS', 'progress': 40}
+        response_poll = self.client.post(status_url, HTTP_REFERER=dashboard_url, HTTP_ACCEPT='text/html', follow=True)
+        self.assertEqual(response_poll.status_code, 200)
+        self.assertRedirects(response_poll, dashboard_url)
+
+        recording.refresh_from_db()
+        self.assertEqual(recording.status, SpeechRecording.Status.PROCESSING)
+        self.assertFalse(SpeechTranscript.objects.filter(recording=recording).exists())
+
+        # Step 4: Check Status when job transitions to COMPLETED
+        mock_client.get_job_status.return_value = {'job_id': 'e2e_job_101', 'status': 'COMPLETED'}
+        mock_client.fetch_completed_transcript.return_value = {
+            'text': "Mr Speaker, we are proud to propose the motion.",
+            'language_code': 'en-IN',
+            'duration': 420.5,
+            'overall_confidence': 0.98,
+            'segments': [
+                {
+                    'speaker': 'Speaker 1',
+                    'start': 0.0,
+                    'end': 5.2,
+                    'text': 'Mr Speaker, we are proud to propose the motion.',
+                    'confidence': 0.98,
+                }
+            ],
+            'metadata': {
+                'overall_confidence': 0.98,
+                'duration': 420.5,
+                'segments': [
+                    {
+                        'speaker': 'Speaker 1',
+                        'start': 0.0,
+                        'end': 5.2,
+                        'text': 'Mr Speaker, we are proud to propose the motion.',
+                        'confidence': 0.98,
+                    }
+                ],
+            },
+        }
+
+        response_complete = self.client.post(status_url, HTTP_REFERER=dashboard_url, HTTP_ACCEPT='text/html', follow=True)
+        self.assertEqual(response_complete.status_code, 200)
+        self.assertRedirects(response_complete, dashboard_url)
+
+        # Recording is now COMPLETED and SpeechTranscript is persisted
+        recording.refresh_from_db()
+        self.assertEqual(recording.status, SpeechRecording.Status.COMPLETED)
+        self.assertTrue(SpeechTranscript.objects.filter(recording=recording).exists())
+        self.assertEqual(recording.transcript.text, "Mr Speaker, we are proud to propose the motion.")
+        self.assertEqual(recording.transcript.language_code, "en-IN")
+
+        # Step 5: Dashboard now displays "View Transcript" link
+        self.assertContains(response_complete, "View Transcript")
+        detail_url = reverse('speech-transcript-detail', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+        self.assertContains(response_complete, detail_url)
+
+        # Step 6: View Transcript Detail page displays metadata, audio playback, and diarized segments
+        response_detail = self.client.get(detail_url)
+        self.assertEqual(response_detail.status_code, 200)
+        self.assertContains(response_detail, "Mr Speaker, we are proud to propose the motion.")
+        self.assertContains(response_detail, "Speaker 1")
+        self.assertContains(response_detail, "en-IN")
+        self.assertContains(response_detail, "0.98")
+        self.assertContains(response_detail, "420.5s")
+        audio_stream_url = reverse('speech-recording-audio', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+        self.assertContains(response_detail, audio_stream_url)
+
+        # Step 7: Stream protected audio file
+        response_audio = self.client.get(audio_stream_url)
+        self.assertEqual(response_audio.status_code, 200)
+        audio_content = b"".join(response_audio.streaming_content)
+        self.assertTrue(len(audio_content) > 0)
+
+    # 35. Verify frontend templates use form.dataset.submitting and do not cancel on button.disabled
+    def test_frontend_templates_double_submit_prevention_logic(self):
+        recording = SpeechRecording.objects.create(
+            debate=self.debate,
+            speaker=self.speaker1,
+            audio_file=self._create_audio_file("frontend_test.wav"),
+            job_id='job_fe_1',
+            status=SpeechRecording.Status.PROCESSING,
+        )
+
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+        resp_dashboard = self.client.get(dashboard_url)
+        self.assertEqual(resp_dashboard.status_code, 200)
+        content_dash = resp_dashboard.content.decode('utf-8')
+
+        # Check that check-status form exists and uses POST with CSRF
+        self.assertIn('class="d-inline check-status-form"', content_dash)
+        self.assertIn('name="csrfmiddlewaretoken"', content_dash)
+        # Check that the submission prevention script uses form.dataset.submitting
+        self.assertIn("form.dataset.submitting === 'true'", content_dash)
+        self.assertIn("form.dataset.submitting = 'true'", content_dash)
+        # Ensure the fragile check on btn.disabled / btn.classList.contains('disabled') was removed
+        self.assertNotIn("btn.classList.contains('disabled') || btn.disabled", content_dash)
+
+        # Check the same in transcript_detail.html
+        detail_url = reverse('speech-transcript-detail', kwargs={
+            'tournament_slug': self.tournament.slug,
+            'recording_id': recording.id,
+        })
+        resp_detail = self.client.get(detail_url)
+        self.assertEqual(resp_detail.status_code, 200)
+        content_detail = resp_detail.content.decode('utf-8')
+        self.assertIn("form.dataset.submitting === 'true'", content_detail)
+        self.assertIn("form.dataset.submitting = 'true'", content_detail)
+        self.assertNotIn("btn.classList.contains('disabled') || btn.disabled", content_detail)
+

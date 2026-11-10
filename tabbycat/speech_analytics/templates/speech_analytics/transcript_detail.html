@@ -261,18 +261,17 @@
         var form = e.target.closest('.check-status-form, .retry-form');
         if (!form) return;
 
-        var btn = form.querySelector('.check-status-btn, .retry-btn');
-        if (!btn) return;
-
-        if (btn.classList.contains('disabled') || btn.disabled) {
+        if (form.dataset.submitting === 'true') {
           e.preventDefault();
           return;
         }
+        form.dataset.submitting = 'true';
 
-        btn.classList.add('disabled');
-        btn.disabled = true;
-        var loadingText = btn.classList.contains('retry-btn') ? '{% trans "Retrying..." %}' : '{% trans "Checking..." %}';
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + loadingText;
+        var btn = form.querySelector('.check-status-btn, .retry-btn');
+        if (btn) {
+          var loadingText = btn.classList.contains('retry-btn') ? '{% trans "Retrying..." %}' : '{% trans "Checking..." %}';
+          btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + loadingText;
+        }
       });
     })();
   </script>
