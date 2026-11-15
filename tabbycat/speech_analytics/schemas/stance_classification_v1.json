@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tabbycat.org/schemas/stance-classification/v1.json",
+  "title": "DebateStanceClassificationV1",
+  "description": "Structured output schema for topic-conditioned stance classification across debate transcript sentences.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "motion",
+    "model_version",
+    "predictions",
+    "stats",
+    "warnings"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "motion": {
+      "type": "string"
+    },
+    "model_version": {
+      "type": "string"
+    },
+    "predictions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "sentence_id",
+          "sentence_text",
+          "motion",
+          "motion_hypothesis",
+          "predicted_stance",
+          "uncertainty_status",
+          "filter_reason",
+          "model_version",
+          "evidence_reference"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "sentence_id": { "type": "string" },
+          "sentence_text": { "type": "string" },
+          "motion": { "type": "string" },
+          "motion_hypothesis": { "type": "string" },
+          "predicted_stance": {
+            "type": "string",
+            "enum": ["PRO", "CON", "UNCERTAIN", "NOT_APPLICABLE"]
+          },
+          "contradiction_probability": {
+            "type": ["number", "null"],
+            "minimum": 0.0,
+            "maximum": 1.0
+          },
+          "entailment_probability": {
+            "type": ["number", "null"],
+            "minimum": 0.0,
+            "maximum": 1.0
+          },
+          "neutral_probability": {
+            "type": ["number", "null"],
+            "minimum": 0.0,
+            "maximum": 1.0
+          },
+          "uncertainty_status": {
+            "type": "string",
+            "enum": [
+              "CONFIDENT",
+              "LOW_MARGIN",
+              "BELOW_THRESHOLD",
+              "DOMINANT_NEUTRAL",
+              "SKIPPED_PROCEDURAL"
+            ]
+          },
+          "filter_reason": { "type": "string" },
+          "model_version": { "type": "string" },
+          "evidence_reference": {
+            "type": "object",
+            "required": ["source", "quote", "observation_type"],
+            "properties": {
+              "source": { "type": "string" },
+              "quote": { "type": "string" },
+              "start_time": { "type": ["number", "null"] },
+              "end_time": { "type": ["number", "null"] },
+              "is_approximate": { "type": "boolean" },
+              "speaker_identifier": { "type": ["string", "null"] },
+              "speech_role": { "type": ["string", "null"] },
+              "observation_type": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "required": [
+        "total_sentences",
+        "total_evaluated",
+        "total_pro",
+        "total_con",
+        "total_uncertain",
+        "total_skipped_procedural"
+      ],
+      "properties": {
+        "total_sentences": { "type": "integer" },
+        "total_evaluated": { "type": "integer" },
+        "total_pro": { "type": "integer" },
+        "total_con": { "type": "integer" },
+        "total_uncertain": { "type": "integer" },
+        "total_skipped_procedural": { "type": "integer" }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

@@ -13,6 +13,7 @@ from jsonschema.exceptions import ValidationError as JSONSchemaValidationError
 SCHEMA_DIR = os.path.join(os.path.dirname(__file__), 'schemas')
 V1_SCHEMA_PATH = os.path.join(SCHEMA_DIR, 'debate_analysis_v1.json')
 V1_INPUT_SCHEMA_PATH = os.path.join(SCHEMA_DIR, 'debate_analysis_input_v1.json')
+V1_STANCE_SCHEMA_PATH = os.path.join(SCHEMA_DIR, 'stance_classification_v1.json')
 
 
 class DebateAnalysisValidationError(Exception):
@@ -44,6 +45,39 @@ def load_debate_analysis_input_schema(version: str = "1.0.0") -> Dict[str, Any]:
 
     with open(schema_path, 'r', encoding='utf-8') as f:
         return json.load(f)
+
+
+def load_stance_classification_schema(version: str = "1.0.0") -> Dict[str, Any]:
+    """Load the JSON schema dictionary for the requested stance classification contract version."""
+    if version in ("1.0.0", "1.0", "v1"):
+        schema_path = V1_STANCE_SCHEMA_PATH
+    else:
+        raise ValueError(f"Unsupported stance classification contract version: {version}")
+
+    with open(schema_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def validate_stance_classification(
+    payload: Any,
+    version: str = "1.0.0",
+) -> Tuple[bool, List[str]]:
+    """Validate a stance classification dictionary against the versioned JSON Schema."""
+    errors: List[str] = []
+
+    if not isinstance(payload, dict):
+        return False, [f"Payload must be a dictionary, got {type(payload).__name__}."]
+
+    schema = load_stance_classification_schema(version)
+    validator_cls = jsonschema.validators.validator_for(schema)
+    validator = validator_cls(schema)
+
+    for err in sorted(validator.iter_errors(payload), key=lambda e: e.path):
+        loc = ".".join(str(p) for p in err.path) if err.path else "root"
+        errors.append(f"[{loc}] {err.message}")
+
+    return (len(errors) == 0), errors
+
 
 
 def validate_debate_analysis_input(

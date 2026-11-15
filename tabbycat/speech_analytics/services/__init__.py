@@ -17,6 +17,19 @@ from .factory import get_stt_client
 from .gnani import GnaniPrismaBatchClient
 from .google_speech import GoogleSpeechClient
 from .preprocessor import TranscriptPreprocessor, preprocess_transcript
+from .stance import (
+    BaseStanceClassifier,
+    DeBERTaStanceClassifier,
+    MockStanceClassifier,
+    StanceConfigurationError,
+    StanceError,
+    StanceInferenceError,
+    StanceModelLoadError,
+    StancePrediction,
+    classify_transcript_stance,
+    get_stance_classifier,
+    is_procedural_sentence,
+)
 
 __all__ = [
     'BaseSpeechToTextClient',
@@ -37,4 +50,15 @@ __all__ = [
     'build_debate_context',
     'DebateAnalysisInputBundle',
     'build_debate_analysis_input',
+    'BaseStanceClassifier',
+    'StancePrediction',
+    'DeBERTaStanceClassifier',
+    'MockStanceClassifier',
+    'get_stance_classifier',
+    'classify_transcript_stance',
+    'is_procedural_sentence',
+    'StanceError',
+    'StanceConfigurationError',
+    'StanceModelLoadError',
+    'StanceInferenceError',
 ]
