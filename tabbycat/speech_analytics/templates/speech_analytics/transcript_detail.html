@@ -30,6 +30,13 @@
         <i data-feather="rotate-cw"></i> {% trans "Retry Transcription" %}
       </button>
     </form>
+  {% elif recording.status == 'C' and transcript %}
+    <form method="post" action="{% tournamenturl 'speech-transcript-stance' recording_id=recording.id %}" class="d-inline stance-analysis-form">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-success stance-btn" data-recording-id="{{ recording.id }}">
+        <i data-feather="crosshair"></i> {% if stance_analysis %}{% trans "Re-run Stance Analysis" %}{% else %}{% trans "Run Stance Analysis" %}{% endif %}
+      </button>
+    </form>
   {% endif %}
 {% endblock %}
 
@@ -246,6 +253,247 @@
             </details>
           {% endif %}
 
+          <!-- Milestone 3: Stance Analysis Section -->
+          <div class="card mt-4 border-info">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+              <span class="font-weight-bold text-dark">
+                <i data-feather="target" class="text-info"></i> {% trans "Topic Stance Analysis (DeBERTa NLI)" %}
+              </span>
+              {% if stance_analysis %}
+                <span class="badge badge-info">{{ stance_analysis.model_version }}</span>
+              {% endif %}
+            </div>
+            <div class="card-body">
+              {% if stance_analysis %}
+                <!-- Prominent Disclaimer / Labelling -->
+                <div class="alert alert-light border small text-muted mb-3">
+                  <i data-feather="alert-circle" class="mr-1 text-secondary"></i>
+                  <strong>{% trans "Experimental NLP Analysis Notice" %}:</strong>
+                  {% trans "The labels below are sentence-level semantic stance predictions relative to the motion hypothesis. They are NOT verified debate arguments, do NOT equate to the debater's overall speaker or team alignment, and do NOT constitute debate-quality scores." %}
+                </div>
+
+                <!-- Motion & Summary Stats -->
+                <div class="mb-3 p-3 bg-light rounded border">
+                  <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div>
+                      <span class="text-muted small font-weight-bold text-uppercase">{% trans "Evaluated Motion" %}:</span>
+                      <strong class="text-dark d-block" style="font-size: 1.05rem;">
+                        {% if stance_analysis.motion %}
+                          {{ stance_analysis.motion }}
+                        {% else %}
+                          <span class="text-danger italic">{% trans "(No motion specified)" %}</span>
+                        {% endif %}
+                      </strong>
+                    </div>
+                    <div>
+                      {% if stance_analysis.motion_source == "custom_override" %}
+                        <span class="badge badge-warning text-dark border">
+                          <i data-feather="edit-2" style="width: 12px; height: 12px;"></i> {% trans "Manual Analysis Override" %}
+                        </span>
+                      {% elif stance_analysis.motion %}
+                        <span class="badge badge-success border">
+                          <i data-feather="check-circle" style="width: 12px; height: 12px;"></i> {% trans "Official Debate Motion" %}
+                        </span>
+                      {% endif %}
+                    </div>
+                  </div>
+
+                  {% if is_stance_stale %}
+                    <div class="alert alert-warning py-2 mb-2 small">
+                      <i data-feather="alert-triangle"></i>
+                      <strong>{% trans "Motion Changed" %}:</strong>
+                      {% blocktrans trimmed with current=official_motion_text %}
+                        This cached analysis was evaluated against a different motion than the current tournament motion: "{{ current }}". Please re-run stance analysis.
+                      {% endblocktrans %}
+                    </div>
+                  {% endif %}
+
+                  <div class="d-flex flex-wrap align-items-center small mt-2">
+                    <span class="badge badge-success mr-2 mb-1 p-2">{% trans "PRO" %}: {{ stance_analysis.stats.total_pro }}</span>
+                    <span class="badge badge-danger mr-2 mb-1 p-2">{% trans "CON" %}: {{ stance_analysis.stats.total_con }}</span>
+                    <span class="badge badge-warning text-dark mr-2 mb-1 p-2">{% trans "Uncertain" %}: {{ stance_analysis.stats.total_uncertain }}</span>
+                    <span class="badge badge-secondary mr-2 mb-1 p-2">{% trans "Procedural / Skipped" %}: {{ stance_analysis.stats.total_skipped_procedural }}</span>
+                    <span class="text-muted ml-auto mb-1">{% trans "Total Evaluated" %}: {{ stance_analysis.stats.total_evaluated }} / {{ stance_analysis.stats.total_sentences }} {% trans "sentences" %}</span>
+                  </div>
+                </div>
+
+                <!-- Prominent Warnings -->
+                {% if stance_analysis.warnings %}
+                  <div class="alert alert-warning py-2 mb-3">
+                    <strong class="d-block mb-1"><i data-feather="alert-triangle"></i> {% trans "Analysis Warnings" %}:</strong>
+                    <ul class="mb-0 pl-3 small">
+                      {% for warn in stance_analysis.warnings %}
+                        <li>{{ warn }}</li>
+                      {% endfor %}
+                    </ul>
+                  </div>
+                {% endif %}
+
+                <!-- Predictions Table / List -->
+                <h6 class="font-weight-bold text-muted mb-2">{% trans "Sentence-Level Stance Predictions" %}</h6>
+                <div class="table-responsive">
+                  <table class="table table-sm table-hover border">
+                    <thead class="thead-light small">
+                      <tr>
+                        <th style="width: 80px;">{% trans "ID" %}</th>
+                        <th style="width: 140px;">{% trans "Speaker / Role" %}</th>
+                        <th style="width: 130px;">{% trans "Timestamp" %}</th>
+                        <th>{% trans "Sentence & Evidence Quote" %}</th>
+                        <th style="width: 110px;">{% trans "Stance" %}</th>
+                        <th style="width: 170px;">{% trans "Probabilities" %}</th>
+                      </tr>
+                    </thead>
+                    <tbody class="small">
+                      {% for pred in stance_analysis.predictions %}
+                        <tr>
+                          <td><code>{{ pred.sentence_id }}</code></td>
+                          <td>
+                            {% if pred.evidence_reference.speaker_identifier and pred.evidence_reference.speaker_identifier != 'Unassigned' %}
+                              <strong>{{ pred.evidence_reference.speaker_identifier }}</strong>
+                            {% else %}
+                              <span class="text-muted italic">{% trans "Unassigned" %}</span>
+                            {% endif %}
+                            {% if pred.evidence_reference.speech_role %}
+                              <br><small class="text-muted">{{ pred.evidence_reference.speech_role }}</small>
+                            {% endif %}
+                          </td>
+                          <td>
+                            {% if pred.evidence_reference.start_time is not None %}
+                              <span>{{ pred.evidence_reference.start_time|floatformat:1 }}s - 
+                                {% if pred.evidence_reference.end_time is not None %}
+                                  {{ pred.evidence_reference.end_time|floatformat:1 }}s
+                                {% else %}
+                                  ...
+                                {% endif %}
+                              </span>
+                              {% if pred.evidence_reference.is_approximate %}
+                                <br><span class="badge badge-light border text-muted">{% trans "Approx" %}</span>
+                              {% else %}
+                                <br><span class="badge badge-light border text-info">{% trans "Exact" %}</span>
+                              {% endif %}
+                            {% else %}
+                              <span class="text-muted italic">{% trans "N/A" %}</span>
+                            {% endif %}
+                          </td>
+                          <td>
+                            <p class="mb-1 text-dark">{{ pred.sentence_text }}</p>
+                            {% if pred.predicted_stance == 'NOT_APPLICABLE' %}
+                              <span class="badge badge-light border text-muted">
+                                <i data-feather="corner-down-right" style="width: 12px; height: 12px;"></i> {{ pred.filter_reason }}
+                              </span>
+                            {% endif %}
+                          </td>
+                          <td>
+                            {% if pred.predicted_stance == 'PRO' %}
+                              <span class="badge badge-success font-weight-bold p-1">PRO</span>
+                            {% elif pred.predicted_stance == 'CON' %}
+                              <span class="badge badge-danger font-weight-bold p-1">CON</span>
+                            {% elif pred.predicted_stance == 'UNCERTAIN' %}
+                              <span class="badge badge-warning text-dark font-weight-bold p-1">UNCERTAIN</span>
+                            {% else %}
+                              <span class="badge badge-secondary p-1">N/A</span>
+                            {% endif %}
+                            {% if pred.uncertainty_status and pred.uncertainty_status != 'CONFIDENT' and pred.uncertainty_status != 'SKIPPED_PROCEDURAL' %}
+                              <br><small class="text-muted">{{ pred.uncertainty_status }}</small>
+                            {% endif %}
+                          </td>
+                          <td>
+                            {% if pred.predicted_stance != 'NOT_APPLICABLE' and pred.entailment_probability is not None %}
+                              <div><span class="text-success">PRO:</span> {{ pred.entailment_probability|floatformat:2 }}</div>
+                              <div><span class="text-danger">CON:</span> {{ pred.contradiction_probability|floatformat:2 }}</div>
+                              <div><span class="text-muted">NEU:</span> {{ pred.neutral_probability|floatformat:2 }}</div>
+                            {% else %}
+                              <span class="text-muted italic">-</span>
+                            {% endif %}
+                          </td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+
+                <details class="mt-2">
+                  <summary class="small text-muted font-weight-bold" style="cursor: pointer;">
+                    <i data-feather="code"></i> {% trans "View Stance Analysis JSON" %}
+                  </summary>
+                  <pre class="bg-dark text-white p-3 rounded mt-2 small" style="max-height: 250px; overflow-y: auto;"><code>{{ stance_analysis_json }}</code></pre>
+                </details>
+
+                <!-- Re-run Form with Custom Motion Option -->
+                <div class="mt-4 pt-3 border-top">
+                  <form method="post" action="{% tournamenturl 'speech-transcript-stance' recording_id=recording.id %}" class="stance-analysis-form">
+                    {% csrf_token %}
+                    <div class="form-group mb-2">
+                      <label class="small font-weight-bold text-muted mb-1">
+                        {% trans "Re-run Analysis with Motion Override (Optional)" %}:
+                      </label>
+                      <div class="input-group">
+                        <input type="text" name="custom_motion" class="form-control form-control-sm" placeholder="{% if official_motion_text %}{{ official_motion_text }}{% else %}{% trans "Enter custom motion (e.g. This House would ban...)" %}{% endif %}">
+                        <div class="input-group-append">
+                          <button type="submit" class="btn btn-sm btn-outline-info stance-btn" data-recording-id="{{ recording.id }}">
+                            <i data-feather="refresh-cw"></i> {% trans "Re-run Stance Analysis" %}
+                          </button>
+                        </div>
+                      </div>
+                      <small class="form-text text-muted">
+                        {% if official_motion_text %}
+                          {% trans "Leave blank to re-evaluate using the official debate motion." %}
+                        {% else %}
+                          {% trans "No official motion is assigned to this debate; enter a motion above to analyze stance." %}
+                        {% endif %}
+                      </small>
+                    </div>
+                  </form>
+                </div>
+
+              {% else %}
+                <div class="text-center py-4">
+                  <i data-feather="crosshair" style="width: 36px; height: 36px;" class="mb-2 text-info"></i>
+                  <h6>{% trans "No Stance Analysis Run Yet" %}</h6>
+                  <p class="text-muted small mb-3">
+                    {% trans "Run our fine-tuned DeBERTa stance classifier on this transcript to evaluate sentence-level support or opposition relative to the debate motion." %}
+                  </p>
+
+                  {% if official_motion_text %}
+                    <div class="alert alert-light border small text-left d-inline-block text-muted mb-3" style="max-width: 600px;">
+                      <strong>{% trans "Official Debate Motion" %}:</strong> {{ official_motion_text }}
+                    </div>
+                    <div>
+                      <form method="post" action="{% tournamenturl 'speech-transcript-stance' recording_id=recording.id %}" class="d-inline stance-analysis-form">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline-info stance-btn" data-recording-id="{{ recording.id }}">
+                          <i data-feather="play"></i> {% trans "Run Stance Analysis with Official Motion" %}
+                        </button>
+                      </form>
+                    </div>
+                  {% else %}
+                    <div class="alert alert-warning small text-left d-inline-block mb-3" style="max-width: 600px;">
+                      <i data-feather="alert-circle"></i>
+                      <strong>{% trans "No Motion Assigned to this Debate" %}:</strong>
+                      {% trans "Stance analysis requires a motion hypothesis. You can assign a motion to this round in Tabbycat, or supply a temporary analysis override below." %}
+                    </div>
+                    <form method="post" action="{% tournamenturl 'speech-transcript-stance' recording_id=recording.id %}" class="d-inline-block text-left stance-analysis-form" style="max-width: 500px; width: 100%;">
+                      {% csrf_token %}
+                      <div class="form-group mb-2">
+                        <label class="small font-weight-bold text-muted mb-1">{% trans "Supply Analysis Motion Override" %}:</label>
+                        <div class="input-group">
+                          <input type="text" name="custom_motion" class="form-control form-control-sm" placeholder="{% trans "e.g. This House would ban targeted advertising" %}" required>
+                          <div class="input-group-append">
+                            <button type="submit" class="btn btn-sm btn-info stance-btn" data-recording-id="{{ recording.id }}">
+                              <i data-feather="play"></i> {% trans "Run" %}
+                            </button>
+                          </div>
+                        </div>
+                        <small class="form-text text-muted">{% trans "This override is only used for this analysis run and does not modify official tournament records." %}</small>
+                      </div>
+                    </form>
+                  {% endif %}
+
+                </div>
+              {% endif %}
+            </div>
+          </div>
+
 
         {% else %}
           <!-- No Transcript Available Yet -->
@@ -276,7 +524,7 @@
   <script>
     (function() {
       document.addEventListener('submit', function(e) {
-        var form = e.target.closest('.check-status-form, .retry-form');
+        var form = e.target.closest('.check-status-form, .retry-form, .stance-analysis-form');
         if (!form) return;
 
         if (form.dataset.submitting === 'true') {
@@ -285,9 +533,16 @@
         }
         form.dataset.submitting = 'true';
 
-        var btn = form.querySelector('.check-status-btn, .retry-btn');
+        var btn = form.querySelector('.check-status-btn, .retry-btn, .stance-btn');
         if (btn) {
-          var loadingText = btn.classList.contains('retry-btn') ? '{% trans "Retrying..." %}' : '{% trans "Checking..." %}';
+          var loadingText = '{% trans "Processing..." %}';
+          if (btn.classList.contains('retry-btn')) {
+            loadingText = '{% trans "Retrying..." %}';
+          } else if (btn.classList.contains('check-status-btn')) {
+            loadingText = '{% trans "Checking..." %}';
+          } else if (btn.classList.contains('stance-btn')) {
+            loadingText = '{% trans "Analyzing Stance..." %}';
+          }
           btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + loadingText;
         }
       });

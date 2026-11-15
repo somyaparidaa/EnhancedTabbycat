@@ -19,6 +19,11 @@ from .models import SpeechRecording, SpeechTranscript
 from .services import STTError, get_stt_client
 from .services.exceptions import GnaniSTTError
 from .services.gnani import GnaniPrismaBatchClient
+from .services.stance import (
+    StanceError,
+    classify_transcript_stance,
+    get_stance_classifier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -441,6 +446,30 @@ class SpeechTranscriptDetailView(AdministratorMixin, TournamentMixin, DetailView
             except Exception as exc:
                 logger.warning("Could not generate analysis bundle preview for transcript #%s: %s", getattr(transcript, 'pk', None), exc)
 
+        # Milestone 3: Stance analysis inspection & cache retrieval
+        context['stance_analysis'] = None
+        context['stance_analysis_json'] = None
+        context['is_stance_stale'] = False
+        context['official_motion_text'] = None
+
+        if context.get('analysis_bundle'):
+            motion_ctx = (context['analysis_bundle'].get('debate_context') or {}).get('motion') or {}
+            primary_m = motion_ctx.get('primary_motion') or {}
+            context['official_motion_text'] = primary_m.get('text')
+
+        if transcript and isinstance(transcript.metadata, dict):
+            cached_stance = transcript.metadata.get('stance_analysis')
+            if cached_stance:
+                context['stance_analysis'] = cached_stance
+                # Check whether cached stance was run on a motion different from current official motion
+                cached_motion = cached_stance.get('motion')
+                if context['official_motion_text'] and cached_motion and (cached_motion != context['official_motion_text']):
+                    context['is_stance_stale'] = True
+
+                try:
+                    context['stance_analysis_json'] = json.dumps(cached_stance, indent=2, ensure_ascii=False)
+                except Exception:
+                    context['stance_analysis_json'] = str(cached_stance)
 
         return context
 
@@ -644,3 +673,126 @@ class SpeechRecordingAudioStreamView(AdministratorMixin, TournamentMixin, View):
             raise Http404(_("Audio file could not be opened.")) from exc
 
         return FileResponse(file_handle, as_attachment=False)
+
+
+class SpeechTranscriptStanceAnalysisView(AdministratorMixin, TournamentMixin, View):
+    """Endpoint to run topic-conditioned DeBERTa stance classification on a transcript.
+
+    Invokes classify_transcript_stance() against the Stage 2B DebateAnalysisInput bundle.
+    Safely stores results in transcript.metadata['stance_analysis'] to avoid unnecessary
+    re-computations on future page loads.
+    Strictly accepts POST with CSRF protection and enforces tournament-level isolation.
+    """
+
+    def _is_html_request(self):
+        accept = self.request.headers.get('accept', '')
+        return ('text/html' in accept and 'application/json' not in accept) or (self.request.GET.get('format') == 'html')
+
+    def _redirect_html(self, request, msg, level=messages.INFO):
+        if level == messages.SUCCESS:
+            messages.success(request, msg)
+        elif level == messages.WARNING:
+            messages.warning(request, msg)
+        elif level == messages.ERROR:
+            messages.error(request, msg)
+        else:
+            messages.info(request, msg)
+
+        referer = request.META.get('HTTP_REFERER')
+        if referer and url_has_allowed_host_and_scheme(
+            url=referer,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            return HttpResponseRedirect(referer)
+
+        return HttpResponseRedirect(reverse_tournament('speech-analytics-dashboard', self.tournament))
+
+    def post(self, request, *args, **kwargs):
+        recording_id = self.kwargs.get('recording_id')
+
+        # Retrieve recording strictly scoped to current tournament
+        recording = get_object_or_404(
+            SpeechRecording.objects.select_related('debate__round__tournament'),
+            pk=recording_id,
+            debate__round__tournament=self.tournament,
+        )
+
+        transcript = getattr(recording, 'transcript', None)
+        is_html = self._is_html_request()
+
+        if not transcript:
+            err_msg = _("Cannot analyze stance: No transcript has been generated for this recording.")
+            if is_html:
+                return self._redirect_html(request, err_msg, messages.ERROR)
+            return JsonResponse({'success': False, 'error': err_msg}, status=400)
+
+        # 1. Build Stage 2B Analysis Bundle
+        try:
+            analysis_bundle = transcript.get_analysis_input()
+        except Exception as exc:
+            logger.exception("Failed to build debate analysis bundle for transcript #%s", transcript.pk)
+            err_msg = _("Failed to generate debate analysis bundle: %(error)s") % {'error': str(exc)}
+            if is_html:
+                return self._redirect_html(request, err_msg, messages.ERROR)
+            return JsonResponse({'success': False, 'error': err_msg}, status=500)
+
+        # 2. Check for optional motion override from form POST (useful if round motion is unassigned)
+        custom_motion = request.POST.get('custom_motion', '').strip() or None
+
+        # 3. Instantiate stance classifier
+        try:
+            classifier = get_stance_classifier()
+        except StanceError as exc:
+            logger.warning("Stance classifier initialization error: %s", exc.message)
+            err_msg = _("Stance classifier could not be loaded: %(error)s") % {'error': exc.message}
+            if is_html:
+                return self._redirect_html(request, err_msg, messages.ERROR)
+            return JsonResponse({'success': False, 'error': err_msg}, status=503)
+        except Exception as exc:
+            logger.exception("Unexpected error initializing stance classifier")
+            err_msg = _("An internal error occurred while loading the stance classifier.")
+            if is_html:
+                return self._redirect_html(request, err_msg, messages.ERROR)
+            return JsonResponse({'success': False, 'error': err_msg}, status=500)
+
+        # 4. Execute stance classification
+        try:
+            results = classify_transcript_stance(
+                analysis_bundle=analysis_bundle,
+                classifier=classifier,
+                custom_motion=custom_motion,
+            )
+            # Record motion source metadata so UI can clearly distinguish official vs custom override
+            results['motion_source'] = "custom_override" if custom_motion else "official_debate_context"
+        except Exception as exc:
+            logger.exception("Error running stance classification for transcript #%s", transcript.pk)
+            err_msg = _("Stance analysis failed: %(error)s") % {'error': str(exc)}
+            if is_html:
+                return self._redirect_html(request, err_msg, messages.ERROR)
+            return JsonResponse({'success': False, 'error': err_msg}, status=500)
+
+        # 5. Persist results in transcript.metadata
+        with transaction.atomic():
+            locked_transcript = SpeechTranscript.objects.select_for_update().get(pk=transcript.pk)
+            meta = locked_transcript.metadata if isinstance(locked_transcript.metadata, dict) else {}
+            meta['stance_analysis'] = results
+            locked_transcript.metadata = meta
+            locked_transcript.save(update_fields=['metadata', 'updated_at'])
+
+        if is_html:
+            stats = results.get('stats', {})
+            msg = _("Stance analysis completed successfully! Evaluated %(evaluated)d sentences (%(pro)d PRO, %(con)d CON, %(unc)d Uncertain, %(skip)d Skipped).") % {
+                'evaluated': stats.get('total_evaluated', 0),
+                'pro': stats.get('total_pro', 0),
+                'con': stats.get('total_con', 0),
+                'unc': stats.get('total_uncertain', 0),
+                'skip': stats.get('total_skipped_procedural', 0),
+            }
+            return self._redirect_html(request, msg, messages.SUCCESS)
+
+        return JsonResponse({
+            'success': True,
+            'recording_id': recording.id,
+            'stance_analysis': results,
+        }, status=200)

@@ -21,4 +21,7 @@ urlpatterns = [
     path('recordings/<int:recording_id>/audio/',
         views.SpeechRecordingAudioStreamView.as_view(),
         name='speech-recording-audio'),
+    path('recordings/<int:recording_id>/stance/',
+        views.SpeechTranscriptStanceAnalysisView.as_view(),
+        name='speech-transcript-stance'),
 ]
