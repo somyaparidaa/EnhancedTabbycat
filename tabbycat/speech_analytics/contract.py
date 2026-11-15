@@ -1,6 +1,6 @@
 """Validation and contract layer for AI-powered competitive debate analysis.
 Provides schema validation, domain checks, and evidence integrity verification
-independent of the underlying LLM provider.
+for both input and output analysis contracts.
 """
 
 import json
@@ -12,6 +12,7 @@ from jsonschema.exceptions import ValidationError as JSONSchemaValidationError
 
 SCHEMA_DIR = os.path.join(os.path.dirname(__file__), 'schemas')
 V1_SCHEMA_PATH = os.path.join(SCHEMA_DIR, 'debate_analysis_v1.json')
+V1_INPUT_SCHEMA_PATH = os.path.join(SCHEMA_DIR, 'debate_analysis_input_v1.json')
 
 
 class DebateAnalysisValidationError(Exception):
@@ -24,7 +25,7 @@ class DebateAnalysisValidationError(Exception):
 
 
 def load_debate_analysis_schema(version: str = "1.0.0") -> Dict[str, Any]:
-    """Load the JSON schema dictionary for the requested contract version."""
+    """Load the JSON schema dictionary for the requested debate analysis output contract version."""
     if version in ("1.0.0", "1.0", "v1"):
         schema_path = V1_SCHEMA_PATH
     else:
@@ -32,6 +33,63 @@ def load_debate_analysis_schema(version: str = "1.0.0") -> Dict[str, Any]:
 
     with open(schema_path, 'r', encoding='utf-8') as f:
         return json.load(f)
+
+
+def load_debate_analysis_input_schema(version: str = "1.0.0") -> Dict[str, Any]:
+    """Load the JSON schema dictionary for the requested debate analysis input contract version."""
+    if version in ("1.0.0", "1.0", "v1"):
+        schema_path = V1_INPUT_SCHEMA_PATH
+    else:
+        raise ValueError(f"Unsupported debate analysis input contract version: {version}")
+
+    with open(schema_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def validate_debate_analysis_input(
+    payload: Any,
+    version: str = "1.0.0",
+) -> Tuple[bool, List[str]]:
+    """Validate a debate analysis input bundle dictionary against the versioned JSON Schema.
+
+    Args:
+        payload: The input bundle dictionary to validate.
+        version: The schema version string (defaults to 1.0.0).
+
+    Returns:
+        A tuple of (is_valid: bool, error_messages: List[str]).
+    """
+    errors: List[str] = []
+
+    if not isinstance(payload, dict):
+        return False, [f"Payload must be a dictionary, got {type(payload).__name__}."]
+
+    schema = load_debate_analysis_input_schema(version)
+
+    validator_cls = jsonschema.validators.validator_for(schema)
+    validator = validator_cls(schema)
+
+    for err in sorted(validator.iter_errors(payload), key=lambda e: e.path):
+        loc = ".".join(str(p) for p in err.path) if err.path else "root"
+        errors.append(f"[{loc}] {err.message}")
+
+    return (len(errors) == 0), errors
+
+
+def ensure_valid_debate_analysis_input(
+    payload: Any,
+    version: str = "1.0.0",
+) -> Dict[str, Any]:
+    """Raise DebateAnalysisValidationError if the input bundle payload is invalid,
+    otherwise return the payload.
+    """
+    is_valid, errors = validate_debate_analysis_input(payload, version=version)
+    if not is_valid:
+        raise DebateAnalysisValidationError(
+            f"Debate analysis input bundle failed validation ({len(errors)} error(s)): {'; '.join(errors[:3])}",
+            errors=errors,
+        )
+    return payload
 
 
 def validate_debate_analysis(

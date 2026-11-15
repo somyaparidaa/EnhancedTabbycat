@@ -207,3 +207,258 @@ Competitive debate analysis requires full round context to evaluate refutations,
 - The model must never construe the absence of an unprovided speech as proof that a speaker failed to respond to it.
 - The contract strictly forbids arbitrary numerical overall scores, speaker points, or debate rankings, preserving debate adjudication integrity while providing actionable qualitative analytics for speaker development.
 
+
+
+---
+
+## 10. Stage 2B: Transcript Intelligence & Debate Context Contract (v1.0.0)
+
+Stage 2B bridges the raw Speech-to-Text layer (`SpeechTranscript`) and downstream NLP models by converting unsegmented transcripts into timestamp-preserving, debate-aware data structures.
+
+### 10.1 Preprocessing & Sentence Segmentation (`TranscriptPreprocessor`)
+
+- **Sentence-Level Splitting**: Segments transcript text into clean grammatical sentences (`s_0001`, `s_0002`, ...) while preserving verbatim character offsets.
+- **Word-Level Timestamp Precision**: When word-level timestamps (`words` array) exist in STT metadata, each sentence derives its exact `start_time` and `end_time` by matching sentence boundaries to word token offsets.
+- **Segment Fallback & Interpolation**: When only segment-level timestamps are available, start and end bounds are proportionally interpolated according to character positions, and an explicit warning is recorded (`Segment-level timestamps proportionally interpolated for internal sentences.`).
+- **Paragraph Grouping**: Sentences are grouped into paragraphs (`p_001`, `p_002`, ...) upon speaker switches or significant acoustic pauses ($\ge 2.5$s default threshold).
+- **Graceful Fault Tolerance**: Handles empty segments, noisy transcripts, punctuation-free transcripts, and missing confidence scores without failing.
+
+### 10.2 Native Tabbycat Context Extraction (`DebateContextBuilder`)
+
+Extracts rich domain context without duplicating Tabbycat models or creating redundant database tables:
+- **Tournament & Rules**: Format name, team counts (`teams_in_debate` = 2 vs 4), speaker sequence (`substantive_speakers`, `reply_scores_enabled`), and side naming configurations (`aff-neg`, `gov-opp`, `prop-opp`).
+- **Round & Stage**: Preliminary vs elimination round, round sequence number, and draw type.
+- **Motion & Info Slide**: Primary debate motion, motion text, reference, info slide, and any vetoed or alternative round motions (`RoundMotion`).
+- **Teams & Sides**: Roster of competing teams with side allocations (`OG`, `OO`, `CG`, `CO` for British Parliamentary; `AFF`, `NEG` for 2-team formats), code names, and institution affiliations.
+- **Speeches & Roles**: Speech positions mapped from confirmed `BallotSubmission` results (e.g. `PM`, `DPM`, `LO`, `DLO`, `MG`, `GW`, `MO`, `OW` in BP, or `Aff1`, `Neg1`, `AffR`, `NegR` in 2-team formats). If no ballot has been submitted yet, expected speech slots are synthesized from tournament rules.
+- **Speaker Mapping & POI Disambiguation**:
+  - `RESOLVED_SINGLE_SPEAKER`: Target speaker specified and aligns with the diarization label.
+  - `RESOLVED_TARGET_WITH_POIS`: Target speaker identified as primary speaker, while secondary diarized labels are isolated as points of information (POIs) or floor interjections without hallucinating speaker identities.
+  - `UNRESOLVED_MULTI_SPEAKER`: Multi-speaker recording without individual speaker linkage.
+  - `DEBATE_ONLY_UNASSIGNED`: Recording linked to the debate with no individual speaker assigned.
+
+### 10.3 Analysis Input Contract (`DebateAnalysisInputBundle`)
+
+Generated programmatically via `transcript.get_analysis_input()` or `build_debate_analysis_input(transcript)`:
+
+- **JSON Schema**: Validated against `tabbycat/speech_analytics/schemas/debate_analysis_input_v1.json`.
+- **Reproducibility Fingerprint**: Every bundle generates a deterministic SHA-256 fingerprint over full text, sentence timestamps, and debate motion IDs.
+- **UI Inspection**: Tournament administrators can view and inspect the structured analysis input bundle directly in the **Transcript Detail** view under *View Structured Debate Analysis Input (NLP Context Bundle)*.
+
+#### Illustrative Debate Analysis Input Payload
+
+```json
+{
+  "contract_version": "1.0.0",
+  "fingerprint": "7c4840d21054b5dfd4fcf7f33be16a5061483bf9872be9c3f4e2f9dcfd0eefaa",
+  "generated_at": "2026-11-15T06:05:00.000000+00:00",
+  "provenance": {
+    "transcript_id": 14,
+    "recording_id": 12,
+    "audio_duration": 420.5,
+    "provider": "google",
+    "language_code": "en-US",
+    "overall_confidence": 0.96,
+    "context_completeness": "isolated_speech"
+  },
+  "debate_context": {
+    "tournament": {
+      "id": 1,
+      "name": "World Universities Debating Championship 2026",
+      "slug": "wudc-2026",
+      "format_name": "British Parliamentary (BP)",
+      "teams_in_debate": 4,
+      "substantive_speakers": 2,
+      "reply_scores_enabled": false,
+      "side_names_style": "gov-opp"
+    },
+    "round": {
+      "id": 1,
+      "seq": 1,
+      "name": "Round 1",
+      "abbreviation": "R1",
+      "stage": "P",
+      "stage_display": "Preliminary",
+      "is_break_round": false,
+      "draw_type": "R"
+    },
+    "debate": {
+      "id": 5,
+      "matchup": "Oxford A vs Harvard B vs Cambridge C vs Sydney D",
+      "importance": 0,
+      "bracket": 0.0,
+      "confirmed_ballot_available": true
+    },
+    "motion": {
+      "primary_motion": {
+        "id": 3,
+        "reference": "Pharma Patents",
+        "text": "This House would abolish patent protection for pharmaceuticals.",
+        "info_slide": "Pharmaceutical patents grant temporary monopolies to developers."
+      },
+      "round_motions": [
+        {
+          "id": 3,
+          "reference": "Pharma Patents",
+          "text": "This House would abolish patent protection for pharmaceuticals.",
+          "info_slide": "Pharmaceutical patents grant temporary monopolies to developers.",
+          "seq": 1,
+          "is_chosen": true
+        }
+      ],
+      "has_multiple_motions": false
+    },
+    "teams": [
+      {
+        "debate_team_id": 10,
+        "team_id": 101,
+        "team_name": "Oxford A",
+        "code_name": "Falcon",
+        "institution": "University of Oxford",
+        "side_raw": 0,
+        "side_code": "OG",
+        "side_name": "Opening Government",
+        "side_abbr": "OG",
+        "rostered_speakers": [
+          { "id": 201, "name": "Alice Smith", "code_name": "AS01" },
+          { "id": 202, "name": "Bob Jones", "code_name": "BJ02" }
+        ]
+      }
+    ],
+    "speeches": [
+      {
+        "position": 1,
+        "side_code": "OG",
+        "role_abbr": "PM",
+        "role_name": "Prime Minister",
+        "speaker_id": 201,
+        "speaker_name": "Alice Smith",
+        "team_id": 101,
+        "team_name": "Oxford A",
+        "is_ghost": false
+      }
+    ],
+    "speaker_mapping": {
+      "status": "RESOLVED_TARGET_WITH_POIS",
+      "target_speaker": {
+        "id": 201,
+        "name": "Alice Smith",
+        "team": "Oxford A",
+        "side_code": "OG",
+        "speech_role": "Prime Minister",
+        "speech_position": 1
+      },
+      "diarized_speakers": ["Speaker 1", "Speaker 2"],
+      "unresolved_speakers": ["Speaker 2"],
+      "mapping": {
+        "Speaker 1": {
+          "speaker_id": 201,
+          "speaker_name": "Alice Smith",
+          "role": "Prime Minister",
+          "type": "target_speaker"
+        },
+        "Speaker 2": {
+          "speaker_id": null,
+          "speaker_name": "Unresolved (POI / Interjection)",
+          "role": "POI / Floor Interjection",
+          "type": "unresolved_poi"
+        }
+      }
+    }
+  },
+  "transcript": {
+    "full_text": "We are proud to propose the motion. First, monopolies create artificial scarcity. Point of information! Rejected, thank you.",
+    "stats": {
+      "total_sentences": 4,
+      "total_paragraphs": 3,
+      "total_words": 18,
+      "speaker_count": 2
+    },
+    "sentences": [
+      {
+        "id": "s_0001",
+        "text": "We are proud to propose the motion.",
+        "speaker": "Speaker 1",
+        "start_time": 0.0,
+        "end_time": 2.4,
+        "confidence": 0.98,
+        "word_count": 7,
+        "segment_index": 1,
+        "timing_source": "words",
+        "paragraph_id": "p_001"
+      },
+      {
+        "id": "s_0002",
+        "text": "First, monopolies create artificial scarcity.",
+        "speaker": "Speaker 1",
+        "start_time": 2.5,
+        "end_time": 5.1,
+        "confidence": 0.95,
+        "word_count": 5,
+        "segment_index": 1,
+        "timing_source": "words",
+        "paragraph_id": "p_001"
+      },
+      {
+        "id": "s_0003",
+        "text": "Point of information!",
+        "speaker": "Speaker 2",
+        "start_time": 5.8,
+        "end_time": 6.9,
+        "confidence": 0.92,
+        "word_count": 3,
+        "segment_index": 2,
+        "timing_source": "words",
+        "paragraph_id": "p_002"
+      },
+      {
+        "id": "s_0004",
+        "text": "Rejected, thank you.",
+        "speaker": "Speaker 1",
+        "start_time": 7.2,
+        "end_time": 8.5,
+        "confidence": 0.97,
+        "word_count": 3,
+        "segment_index": 3,
+        "timing_source": "words",
+        "paragraph_id": "p_003"
+      }
+    ],
+    "paragraphs": [
+      {
+        "id": "p_001",
+        "speaker": "Speaker 1",
+        "sentence_ids": ["s_0001", "s_0002"],
+        "text": "We are proud to propose the motion. First, monopolies create artificial scarcity.",
+        "start_time": 0.0,
+        "end_time": 5.1,
+        "confidence": 0.965,
+        "word_count": 12
+      },
+      {
+        "id": "p_002",
+        "speaker": "Speaker 2",
+        "sentence_ids": ["s_0003"],
+        "text": "Point of information!",
+        "start_time": 5.8,
+        "end_time": 6.9,
+        "confidence": 0.92,
+        "word_count": 3
+      },
+      {
+        "id": "p_003",
+        "speaker": "Speaker 1",
+        "sentence_ids": ["s_0004"],
+        "text": "Rejected, thank you.",
+        "start_time": 7.2,
+        "end_time": 8.5,
+        "confidence": 0.97,
+        "word_count": 3
+      }
+    ]
+  },
+  "warnings": [
+    "Multiple diarized voices detected; primary target speaker separated from POIs/interjections."
+  ]
+}
+```

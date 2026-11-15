@@ -229,6 +229,24 @@
             </details>
           {% endif %}
 
+          {% if analysis_bundle %}
+            <details class="mt-3">
+              <summary class="small text-primary font-weight-bold" style="cursor: pointer;">
+                <i data-feather="cpu"></i> {% trans "View Structured Debate Analysis Input (NLP Context Bundle)" %}
+              </summary>
+              <div class="mt-2">
+                <div class="small text-muted mb-2">
+                  <span class="badge badge-info mr-1">{{ analysis_bundle.debate_context.speaker_mapping.status }}</span>
+                  <span class="badge badge-secondary mr-1">{% trans "Sentences:" %} {{ analysis_bundle.transcript.stats.total_sentences }}</span>
+                  <span class="badge badge-secondary mr-1">{% trans "Paragraphs:" %} {{ analysis_bundle.transcript.stats.total_paragraphs }}</span>
+                  <span class="badge badge-secondary">{% trans "Version:" %} {{ analysis_bundle.contract_version }}</span>
+                </div>
+                <pre class="bg-dark text-white p-3 rounded small" style="max-height: 350px; overflow-y: auto;"><code>{{ analysis_bundle_json }}</code></pre>
+              </div>
+            </details>
+          {% endif %}
+
+
         {% else %}
           <!-- No Transcript Available Yet -->
           <div class="text-center py-5 text-muted">

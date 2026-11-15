@@ -179,3 +179,12 @@ class SpeechTranscript(models.Model):
 
     def __str__(self):
         return f"SpeechTranscript for Recording #{self.recording_id} ({self.language_code})"
+
+    def get_analysis_input(self, custom_metadata=None):
+        """Construct a structured, versioned DebateAnalysisInput bundle for this transcript.
+        
+        Does not mutate the model or database.
+        """
+        from .services.bundle import build_debate_analysis_input
+        return build_debate_analysis_input(self, custom_metadata=custom_metadata)
+

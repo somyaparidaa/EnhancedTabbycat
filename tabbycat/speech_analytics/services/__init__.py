@@ -11,9 +11,12 @@ from .base import (
     STTRateLimitError,
     STTTimeoutError,
 )
+from .bundle import DebateAnalysisInputBundle, build_debate_analysis_input
+from .context_builder import DebateContextBuilder, build_debate_context
 from .factory import get_stt_client
 from .gnani import GnaniPrismaBatchClient
 from .google_speech import GoogleSpeechClient
+from .preprocessor import TranscriptPreprocessor, preprocess_transcript
 
 __all__ = [
     'BaseSpeechToTextClient',
@@ -28,5 +31,10 @@ __all__ = [
     'get_stt_client',
     'GnaniPrismaBatchClient',
     'GoogleSpeechClient',
+    'TranscriptPreprocessor',
+    'preprocess_transcript',
+    'DebateContextBuilder',
+    'build_debate_context',
+    'DebateAnalysisInputBundle',
+    'build_debate_analysis_input',
 ]
-

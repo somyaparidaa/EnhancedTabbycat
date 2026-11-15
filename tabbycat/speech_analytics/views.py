@@ -429,7 +429,21 @@ class SpeechTranscriptDetailView(AdministratorMixin, TournamentMixin, DetailView
         context['transcript_metadata_json'] = transcript_metadata_json
         context['overall_confidence'] = overall_confidence
         context['audio_duration'] = audio_duration
+
+        # Stage 2B: Debate Analysis Input Bundle preview
+        context['analysis_bundle'] = None
+        context['analysis_bundle_json'] = None
+        if transcript is not None:
+            try:
+                analysis_bundle = transcript.get_analysis_input()
+                context['analysis_bundle'] = analysis_bundle
+                context['analysis_bundle_json'] = json.dumps(analysis_bundle, indent=2, ensure_ascii=False)
+            except Exception as exc:
+                logger.warning("Could not generate analysis bundle preview for transcript #%s: %s", getattr(transcript, 'pk', None), exc)
+
+
         return context
+
 
 
 class SpeechRecordingRetryView(AdministratorMixin, TournamentMixin, View):

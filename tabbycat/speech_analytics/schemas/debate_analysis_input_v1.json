@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tabbycat.org/schemas/debate-analysis-input/v1.json",
+  "title": "DebateAnalysisInputV1",
+  "description": "Structured input contract schema for NLP analysis combining preprocessed transcripts and Tabbycat debate domain context.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "fingerprint",
+    "generated_at",
+    "provenance",
+    "debate_context",
+    "transcript",
+    "warnings"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "fingerprint": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "transcript_id",
+        "recording_id",
+        "language_code",
+        "context_completeness"
+      ],
+      "properties": {
+        "transcript_id": { "type": ["integer", "null"] },
+        "recording_id": { "type": ["integer", "null"] },
+        "audio_duration": { "type": ["number", "null"] },
+        "provider": { "type": "string" },
+        "language_code": { "type": "string" },
+        "overall_confidence": { "type": ["number", "null"] },
+        "context_completeness": {
+          "type": "string",
+          "enum": ["full_debate", "partial_round", "isolated_speech"]
+        }
+      }
+    },
+    "debate_context": {
+      "type": "object",
+      "required": ["tournament", "round", "debate", "motion", "teams", "speeches", "speaker_mapping"],
+      "properties": {
+        "tournament": { "type": ["object", "null"] },
+        "round": { "type": ["object", "null"] },
+        "debate": { "type": ["object", "null"] },
+        "motion": { "type": ["object", "null"] },
+        "teams": { "type": "array" },
+        "speeches": { "type": "array" },
+        "speaker_mapping": {
+          "type": "object",
+          "required": ["status", "diarized_speakers", "unresolved_speakers", "mapping"],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "RESOLVED_SINGLE_SPEAKER",
+                "RESOLVED_TARGET_WITH_POIS",
+                "UNRESOLVED_MULTI_SPEAKER",
+                "DEBATE_ONLY_UNASSIGNED",
+                "NO_DEBATE_CONTEXT"
+              ]
+            },
+            "target_speaker": { "type": ["object", "null"] },
+            "diarized_speakers": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "unresolved_speakers": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "mapping": { "type": "object" },
+            "resolution_metadata": { "type": "object" }
+          }
+        }
+      }
+    },
+    "transcript": {
+      "type": "object",
+      "required": ["full_text", "stats", "sentences", "paragraphs"],
+      "properties": {
+        "full_text": { "type": "string" },
+        "stats": {
+          "type": "object",
+          "required": ["total_sentences", "total_paragraphs", "total_words", "speaker_count"],
+          "properties": {
+            "total_sentences": { "type": "integer" },
+            "total_paragraphs": { "type": "integer" },
+            "total_words": { "type": "integer" },
+            "speaker_count": { "type": "integer" }
+          }
+        },
+        "sentences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "text", "speaker", "start_time", "end_time", "word_count", "timing_source", "is_approximate", "paragraph_id"],
+            "properties": {
+              "id": { "type": "string" },
+              "text": { "type": "string" },
+              "speaker": { "type": "string" },
+              "start_time": { "type": ["number", "null"] },
+              "end_time": { "type": ["number", "null"] },
+              "confidence": { "type": ["number", "null"] },
+              "word_count": { "type": "integer" },
+              "segment_index": { "type": "integer" },
+              "timing_source": { "type": "string", "enum": ["words", "segment", "unknown"] },
+              "is_approximate": { "type": "boolean" },
+              "paragraph_id": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "paragraphs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "speaker", "sentence_ids", "text", "start_time", "end_time", "word_count"],
+            "properties": {
+              "id": { "type": "string" },
+              "speaker": { "type": "string" },
+              "sentence_ids": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "text": { "type": "string" },
+              "start_time": { "type": ["number", "null"] },
+              "end_time": { "type": ["number", "null"] },
+              "confidence": { "type": ["number", "null"] },
+              "word_count": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "custom_metadata": {
+      "type": "object"
+    }
+  }
+}
