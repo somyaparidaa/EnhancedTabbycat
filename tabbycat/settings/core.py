@@ -475,5 +475,23 @@ GNANI_API_TIMEOUT = (
 SPEECH_ANALYTICS_MAX_UPLOAD_SIZE = int(os.environ.get('SPEECH_MAX_UPLOAD_SIZE', 100 * 1024 * 1024))  # 100 MB default
 SPEECH_ANALYTICS_ALLOWED_EXTENSIONS = ('.wav', '.mp3', '.m4a', '.ogg', '.flac', '.aac')
 
+# ==============================================================================
+# Speech Analytics NLP Stance Classification
+# ==============================================================================
+
+# Active stance classification provider ('deberta' or 'mock')
+STANCE_CLASSIFIER_BACKEND = os.environ.get('STANCE_CLASSIFIER_BACKEND', 'deberta')
+
+# Local checkpoint directory path for fine-tuned DeBERTa model
+STANCE_MODEL_PATH = os.environ.get('STANCE_MODEL_PATH', '/Users/somya/Developer/stance_ft')
+
+# Target compute device ('cpu', 'mps', 'cuda', or None for auto-detection)
+STANCE_CLASSIFIER_DEVICE = os.environ.get('STANCE_CLASSIFIER_DEVICE', None)
+
+# Confidence and margin thresholds for uncertainty handling
+STANCE_CONFIDENCE_THRESHOLD = float(os.environ.get('STANCE_CONFIDENCE_THRESHOLD', '0.55'))
+STANCE_MARGIN_THRESHOLD = float(os.environ.get('STANCE_MARGIN_THRESHOLD', '0.15'))
+
+
 
 
