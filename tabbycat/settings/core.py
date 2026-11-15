@@ -457,9 +457,11 @@ ENABLE_PUSH_NOTIFICATIONS = os.environ.get("WP_PRIVATE_KEY") is not None
 # Active transcription provider ('gnani' or 'google')
 SPEECH_TRANSCRIPTION_PROVIDER = os.environ.get('SPEECH_TRANSCRIPTION_PROVIDER', 'gnani')
 
-# Google Cloud Speech-to-Text Configuration
+# Google Cloud Speech-to-Text & Cloud Storage Configuration
 GOOGLE_SPEECH_LANGUAGE_CODE = os.environ.get('GOOGLE_SPEECH_LANGUAGE_CODE', 'en-US')
 GOOGLE_SPEECH_MODEL = os.environ.get('GOOGLE_SPEECH_MODEL', 'latest_long')
+GOOGLE_CLOUD_STORAGE_BUCKET_NAME = os.environ.get('GOOGLE_CLOUD_STORAGE_BUCKET_NAME', '')
+GOOGLE_CLOUD_STORAGE_CLEANUP_ON_SUCCESS = os.environ.get('GOOGLE_CLOUD_STORAGE_CLEANUP_ON_SUCCESS', 'true').lower() in ('true', '1', 'yes')
 
 # Gnani AI Prisma Configuration
 GNANI_API_KEY = os.environ.get('GNANI_API_KEY', '')

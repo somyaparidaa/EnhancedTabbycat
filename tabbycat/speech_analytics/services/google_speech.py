@@ -1,9 +1,13 @@
 """Google Cloud Speech-to-Text provider service.
-Supports synchronous recognition (short files <10MB / <=60s) and is architected
-for long-running recognition operations using Google Cloud Speech-to-Text v1.
+Supports:
+1. Short audio (<60s and <10MB): Synchronous recognition (`client.recognize`).
+2. Long audio (>=60s or >=10MB): Asynchronous recognition (`client.long_running_recognize`)
+   via Google Cloud Storage (GCS) using the official `google-cloud-storage` SDK.
 Uses Application Default Credentials (ADC) without hardcoded secrets.
+Never modifies or deletes local user recordings.
 """
 
+import io
 import logging
 import mimetypes
 import os
@@ -18,7 +22,7 @@ from typing import Any, BinaryIO, Dict, List, Optional, Tuple, Union
 from django.conf import settings
 from google.api_core import exceptions as google_exceptions
 from google.auth.exceptions import DefaultCredentialsError, GoogleAuthError
-from google.cloud import speech_v1
+from google.cloud import speech_v1, storage
 
 from .base import (
     BaseSpeechToTextClient,
@@ -31,25 +35,28 @@ from .base import (
     STTRateLimitError,
     STTTimeoutError,
 )
+from .gcs import GoogleCloudStorageService
 
 logger = logging.getLogger(__name__)
 
 
 def detect_audio_format(content: bytes, filename: str = "") -> Dict[str, Any]:
-    """Inspect raw audio bytes and filename to determine format, sample rate, and channels.
-    
+    """Inspect raw audio bytes and filename to determine format, sample rate, channels, and duration.
+
     Does NOT assume extension accurately represents the format.
     Returns a dict with:
         'format': 'wav' | 'flac' | 'mp3' | 'ogg' | 'm4a' | 'unknown'
         'sample_rate': int or None
         'channels': int or None
         'sample_width': int or None
+        'duration': float or None
     """
     info: Dict[str, Any] = {
         'format': 'unknown',
         'sample_rate': None,
         'channels': None,
         'sample_width': None,
+        'duration': None,
     }
 
     if not content:
@@ -58,7 +65,20 @@ def detect_audio_format(content: bytes, filename: str = "") -> Dict[str, Any]:
     # 1. Check WAV / RIFF header
     if len(content) >= 12 and content[:4] == b'RIFF' and content[8:12] == b'WAVE':
         info['format'] = 'wav'
-        # Parse fmt chunk if present
+        try:
+            with wave.open(io.BytesIO(content), 'rb') as w:
+                info['channels'] = w.getnchannels()
+                info['sample_rate'] = w.getframerate()
+                info['sample_width'] = w.getsampwidth()
+                info['audio_format'] = 1
+                frames = w.getnframes()
+                if info['sample_rate'] and info['sample_rate'] > 0:
+                    info['duration'] = round(frames / float(info['sample_rate']), 2)
+                return info
+        except Exception:
+            pass
+
+        # Fallback manual parsing of fmt chunk
         idx = 12
         while idx + 8 <= len(content):
             chunk_id = content[idx:idx+4]
@@ -69,7 +89,7 @@ def detect_audio_format(content: bytes, filename: str = "") -> Dict[str, Any]:
                 info['channels'] = channels
                 info['sample_rate'] = sample_rate
                 info['sample_width'] = bits_per_sample // 8
-                info['audio_format'] = audio_format  # 1 = PCM
+                info['audio_format'] = audio_format
                 break
             idx += 8 + chunk_size
         return info
@@ -175,7 +195,7 @@ def convert_audio_to_wav(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=60,
+            timeout=120,
         )
 
         if result.returncode != 0:
@@ -202,28 +222,34 @@ def convert_audio_to_wav(
         logger.exception("Unexpected error during audio conversion: %s", exc)
         raise STTConfigurationError(f"Unexpected error during audio transcoding: {exc}") from exc
     finally:
-        # Strictly ensure temporary directory and conversion files are removed
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 class GoogleSpeechClient(BaseSpeechToTextClient):
     """Google Cloud Speech-to-Text client implementing BaseSpeechToTextClient.
 
-    Employs Application Default Credentials (ADC).
     Supports:
-      1. Synchronous recognition for local audio files.
-      2. Storage of completed transcripts in memory/local operation state.
-      3. Normalization of word offsets and speaker diarization tags.
-      4. Auto-detection of audio formats and safe transcoding of unsupported formats (e.g. M4A/AAC to LINEAR16 WAV).
+      1. Short audio (<= 60s and < 10MB): Synchronous recognition.
+      2. Long audio (> 60s or >= 10MB): Asynchronous recognition via Google Cloud Storage (GCS).
+      3. Automatic format detection and M4A-to-WAV conversion.
+      4. Polling of long-running operations and transcript normalization.
     """
 
     DEFAULT_LANGUAGE_CODE = "en-US"
     DEFAULT_MODEL = "latest_long"
 
+    # Thresholds for synchronous vs long-running recognition
+    MAX_SYNC_DURATION_SECONDS = 60.0
+    MAX_SYNC_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+
     # In-memory store for completed synchronous operations or tracked local operations
     _local_operations: Dict[str, Dict[str, Any]] = {}
 
-    def __init__(self, client: Optional[speech_v1.SpeechClient] = None):
+    def __init__(
+        self,
+        client: Optional[speech_v1.SpeechClient] = None,
+        storage_service: Optional[GoogleCloudStorageService] = None,
+    ):
         if client:
             self._client = client
         else:
@@ -239,6 +265,14 @@ class GoogleSpeechClient(BaseSpeechToTextClient):
                 raise STTConfigurationError(
                     f"Failed to initialize Google Speech client: {exc}"
                 ) from exc
+
+        self._storage_service = storage_service
+
+    def _get_storage_service(self) -> GoogleCloudStorageService:
+        """Lazily initialize GoogleCloudStorageService when long-running recognition is needed."""
+        if not self._storage_service:
+            self._storage_service = GoogleCloudStorageService()
+        return self._storage_service
 
     def _map_google_exception(self, exc: Exception) -> STTError:
         """Map google.api_core exceptions to provider-neutral STT errors."""
@@ -297,7 +331,6 @@ class GoogleSpeechClient(BaseSpeechToTextClient):
 
         # Resolve model: prefer explicit kwarg, then settings, then default
         selected_model = model if model is not None else getattr(settings, 'GOOGLE_SPEECH_MODEL', self.DEFAULT_MODEL)
-        # Avoid passing invalid model values (such as empty string or 'prisma-v2.5' from other providers)
         if selected_model and selected_model.strip():
             config_kwargs['model'] = selected_model.strip()
 
@@ -321,7 +354,6 @@ class GoogleSpeechClient(BaseSpeechToTextClient):
             if sample_rate:
                 config_kwargs['sample_rate_hertz'] = sample_rate
         else:
-            # Leave encoding unspecified or allow Google to auto-detect if header permits
             config_kwargs['encoding'] = speech_v1.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED
 
         if enable_diarization:
@@ -342,117 +374,242 @@ class GoogleSpeechClient(BaseSpeechToTextClient):
     ) -> Dict[str, Any]:
         """Submit audio to Google Speech-to-Text.
 
-        1. Inspects audio content bytes for true format (does not blindly trust extension).
-        2. If format is unsupported by Google Speech v1 (e.g. M4A/AAC), transcodes to a temporary 16kHz LINEAR16 WAV.
-        3. Never modifies or deletes the original user audio file.
-        4. Executes synchronous recognize() and returns normalized transcript payload.
+        1. Inspects audio content bytes for true format and duration (post-conversion).
+        2. If short audio (<=60s and <10MB): performs synchronous recognition immediately.
+        3. If long audio (>60s or >=10MB): uploads to GCS and initiates long_running_recognize,
+           returning job status 'PROCESSING' with operation ID without blocking.
         """
         try:
             content, filename = self._read_audio_content_and_filename(audio_file)
         except Exception as exc:
             raise STTMalformedResponseError(f"Failed to read audio file input: {exc}") from exc
 
-        # Detect true format
+        # Detect format
         format_info = detect_audio_format(content, filename=filename)
         logger.info("Detected audio format for %s: %s", filename, format_info)
 
-        # Transcode unsupported formats (such as M4A / AAC container or unknown non-WAV/MP3/FLAC/OGG)
+        # Transcode unsupported formats (e.g. M4A / AAC container)
         if format_info['format'] in ('m4a', 'unknown'):
             logger.info("Transcoding %s (%s) to LINEAR16 WAV for Google STT compatibility", filename, format_info['format'])
             content, filename = convert_audio_to_wav(content, source_filename=filename, target_sample_rate=16000)
             format_info = detect_audio_format(content, filename=filename)
+
+        content_size = len(content)
+        audio_duration = format_info.get('duration')
+
+        # Determine whether to use asynchronous long-running recognition
+        is_long_audio = (
+            content_size >= self.MAX_SYNC_SIZE_BYTES
+            or (audio_duration is not None and audio_duration > self.MAX_SYNC_DURATION_SECONDS)
+        )
 
         config = self._build_recognition_config(
             audio_format_info=format_info,
             language_code=language_code,
             **kwargs,
         )
-        audio = speech_v1.RecognitionAudio(content=content)
 
-        job_id = f"google_sync_{uuid.uuid4().hex[:16]}"
-        logger.info("Executing Google Speech synchronous recognition for job %s (%s)", job_id, filename)
+        if not is_long_audio:
+            # Short audio: Synchronous recognition
+            audio = speech_v1.RecognitionAudio(content=content)
+            job_id = f"google_sync_{uuid.uuid4().hex[:16]}"
+            logger.info("Executing Google Speech synchronous recognition for job %s (%s)", job_id, filename)
+
+            try:
+                response = self._client.recognize(config=config, audio=audio)
+            except Exception as exc:
+                mapped_exc = self._map_google_exception(exc)
+                logger.warning("Google Speech recognize failed for job %s: %s", job_id, mapped_exc.message)
+                raise mapped_exc from exc
+
+            normalized = self.normalize_google_response(response, language_code=config.language_code)
+            self._local_operations[job_id] = {
+                'job_id': job_id,
+                'status': 'COMPLETED',
+                'transcript_payload': normalized,
+                'error': None,
+            }
+
+            return {
+                'job_id': job_id,
+                'status': 'COMPLETED',
+                'raw_summary': {'results_count': len(response.results)},
+                'transcript_payload': normalized,
+            }
+
+        # Long audio: Upload to GCS and call long_running_recognize
+        logger.info(
+            "Audio duration (%ss) or size (%d bytes) exceeds synchronous limit. Initiating asynchronous GCS recognition for %s",
+            audio_duration, content_size, filename,
+        )
+        storage_svc = self._get_storage_service()
+        gcs_uri = storage_svc.upload_audio_bytes(content, filename=filename, content_type="audio/wav")
+
+        audio = speech_v1.RecognitionAudio(uri=gcs_uri)
 
         try:
-            response = self._client.recognize(config=config, audio=audio)
+            operation = self._client.long_running_recognize(config=config, audio=audio)
         except Exception as exc:
+            # In case of invocation failure, clean up the uploaded GCS object
+            storage_svc.delete_audio_by_uri(gcs_uri)
             mapped_exc = self._map_google_exception(exc)
-            logger.warning("Google Speech recognize failed for job %s: %s", job_id, mapped_exc.message)
+            logger.warning("Failed to start Google long-running recognition for %s: %s", gcs_uri, mapped_exc.message)
             raise mapped_exc from exc
 
-        # Normalize the response immediately
-        normalized = self.normalize_google_response(response, language_code=config.language_code)
+        operation_name = operation.operation.name if hasattr(operation, 'operation') else getattr(operation, 'name', str(operation))
 
-        # Store in local operations map for status check and retrieval
-        self._local_operations[job_id] = {
-            'job_id': job_id,
-            'status': 'COMPLETED',
-            'transcript_payload': normalized,
+        # Store metadata in local operations store to link operation_name with GCS URI
+        self._local_operations[operation_name] = {
+            'job_id': operation_name,
+            'status': 'PROCESSING',
+            'gcs_uri': gcs_uri,
+            'language_code': config.language_code,
+            'operation': operation,
             'error': None,
         }
 
+        logger.info("Google Speech long-running operation started: %s (GCS: %s)", operation_name, gcs_uri)
         return {
-            'job_id': job_id,
-            'status': 'COMPLETED',
-            'raw_summary': {'results_count': len(response.results)},
-            'transcript_payload': normalized,
+            'job_id': operation_name,
+            'status': 'PROCESSING',
+            'gcs_uri': gcs_uri,
         }
 
     def start_batch_job(self, job_id: str) -> Dict[str, Any]:
-        """For synchronous recognition, job is already processed upon creation."""
+        """Job is already started upon creation in Google Speech-to-Text."""
         op = self._local_operations.get(job_id)
         if op:
             return {'job_id': job_id, 'status': op['status']}
         return {'job_id': job_id, 'status': 'PROCESSING'}
 
     def get_job_status(self, job_id: str) -> Dict[str, Any]:
-        """Poll the status of the Google transcription job."""
-        if job_id in self._local_operations:
-            op = self._local_operations[job_id]
-            return {
-                'job_id': job_id,
-                'status': op['status'],
-                'progress': 100 if op['status'] == 'COMPLETED' else 0,
-                'error': op.get('error'),
-            }
+        """Poll the status of the Google transcription job.
 
-        # If job_id represents an external long-running operation in future:
-        if job_id.startswith("projects/") or "operations/" in job_id:
-            try:
-                operation = self._client.transport.operations_client.get_operation(job_id)
-                if operation.done:
-                    if operation.error and operation.error.message:
-                        return {'job_id': job_id, 'status': 'FAILED', 'error': operation.error.message}
-                    return {'job_id': job_id, 'status': 'COMPLETED'}
-                return {'job_id': job_id, 'status': 'IN_PROGRESS'}
-            except Exception as exc:
-                raise self._map_google_exception(exc) from exc
+        Supports both local synchronous jobs and Google Cloud long-running operations.
+        """
+        # 1. Local synchronous job check
+        if job_id.startswith("google_sync_"):
+            op = self._local_operations.get(job_id)
+            if op:
+                return {
+                    'job_id': job_id,
+                    'status': op['status'],
+                    'progress': 100 if op['status'] == 'COMPLETED' else 0,
+                    'error': op.get('error'),
+                }
+            return {'job_id': job_id, 'status': 'UNKNOWN', 'error': 'Unknown synchronous job ID.'}
 
-        return {'job_id': job_id, 'status': 'UNKNOWN', 'error': 'Unknown job ID.'}
+        # 2. Long-running operation polling
+        try:
+            op_entry = self._local_operations.get(job_id, {})
+            operation = op_entry.get('operation')
+
+            if not operation:
+                operations_client = getattr(self._client, 'transport', None)
+                if operations_client and hasattr(operations_client, 'operations_client'):
+                    op_client = operations_client.operations_client
+                    operation = op_client.get_operation(name=job_id)
+
+            if operation is not None:
+                is_done = operation.done() if callable(getattr(operation, 'done', None)) else getattr(operation, 'done', False)
+                if is_done:
+                    # Check for error (google.rpc.Status or dict or error code)
+                    error = getattr(operation, 'error', None)
+                    if error and (getattr(error, 'code', 0) != 0 or getattr(error, 'message', None)):
+                        err_msg = str(getattr(error, 'message', error))
+                        logger.warning("Google long-running operation %s failed: %s", job_id, err_msg)
+                        if job_id in self._local_operations:
+                            self._local_operations[job_id]['status'] = 'FAILED'
+                            self._local_operations[job_id]['error'] = err_msg
+                        return {'job_id': job_id, 'status': 'FAILED', 'error': err_msg}
+
+                    if job_id in self._local_operations:
+                        self._local_operations[job_id]['status'] = 'COMPLETED'
+
+                    return {'job_id': job_id, 'status': 'COMPLETED', 'progress': 100}
+
+                # Operation still running
+                progress = 0
+                if hasattr(operation, 'metadata') and operation.metadata:
+                    progress = getattr(operation.metadata, 'progress_percent', 0) or 0
+                return {'job_id': job_id, 'status': 'PROCESSING', 'progress': progress}
+
+        except Exception as exc:
+            mapped_exc = self._map_google_exception(exc)
+            logger.warning("Failed to poll Google operation %s: %s", job_id, mapped_exc.message)
+            raise mapped_exc from exc
+
+        return {'job_id': job_id, 'status': 'PROCESSING'}
 
     def fetch_completed_transcript(self, job_id: str) -> Dict[str, Any]:
-        """Retrieve the normalized transcript for the job."""
-        op = self._local_operations.get(job_id)
-        if op and op.get('transcript_payload'):
-            return op['transcript_payload']
+        """Retrieve and normalize the completed transcript for the job.
 
-        raise STTMalformedResponseError(f"No completed transcript found for Google job '{job_id}'.")
+        Cleans up temporary GCS object only after results are successfully extracted.
+        """
+        # Synchronous job
+        if job_id.startswith("google_sync_"):
+            op = self._local_operations.get(job_id)
+            if op and op.get('transcript_payload'):
+                return op['transcript_payload']
+            raise STTMalformedResponseError(f"No completed transcript found for Google job '{job_id}'.")
+
+        # Long-running operation
+        op_entry = self._local_operations.get(job_id, {})
+        gcs_uri = op_entry.get('gcs_uri')
+        language_code = op_entry.get('language_code', self.DEFAULT_LANGUAGE_CODE)
+
+        try:
+            op_entry = self._local_operations.get(job_id, {})
+            operation = op_entry.get('operation')
+
+            if not operation:
+                operations_client = getattr(self._client, 'transport', None)
+                if operations_client and hasattr(operations_client, 'operations_client'):
+                    operation = operations_client.operations_client.get_operation(name=job_id)
+
+            if not operation:
+                raise STTMalformedResponseError(f"Cannot find operation '{job_id}' to fetch transcript.")
+
+            # Extract response payload
+            if hasattr(operation, 'response') and operation.response:
+                response_data = operation.response
+                if hasattr(response_data, 'Is') and response_data.Is(speech_v1.LongRunningRecognizeResponse.pb().DESCRIPTOR):
+                    response = speech_v1.LongRunningRecognizeResponse()
+                    response_data.Unpack(response._pb)
+                else:
+                    response = response_data
+            elif hasattr(operation, 'result') and callable(operation.result):
+                response = operation.result()
+            else:
+                raise STTMalformedResponseError(f"Operation '{job_id}' has no response payload.")
+
+            normalized = self.normalize_google_response(response, language_code=language_code)
+
+            # Safely clean up GCS object if cleanup policy is enabled
+            if gcs_uri and getattr(settings, 'GOOGLE_CLOUD_STORAGE_CLEANUP_ON_SUCCESS', True):
+                try:
+                    storage_svc = self._get_storage_service()
+                    storage_svc.delete_audio_by_uri(gcs_uri)
+                except Exception as exc:
+                    logger.warning("Could not delete temporary GCS object %s after transcription: %s", gcs_uri, exc)
+
+            return normalized
+
+        except Exception as exc:
+            mapped_exc = self._map_google_exception(exc)
+            logger.warning("Failed to fetch completed transcript for Google operation %s: %s", job_id, mapped_exc.message)
+            raise mapped_exc from exc
 
     def normalize_google_response(
-        self, response: speech_v1.RecognizeResponse, language_code: str = "en-US"
+        self, response: Any, language_code: str = "en-US"
     ) -> Dict[str, Any]:
-        """Normalize Google RecognizeResponse into Tabbycat's SpeechTranscript structure.
-
-        Extracts:
-          - Full concatenated transcript text.
-          - Overall confidence average.
-          - Word-level timestamps and speaker diarization tags.
-          - Formatted diarized segments compatible with Tabbycat's UI templates.
-        """
+        """Normalize Google RecognizeResponse or LongRunningRecognizeResponse into Tabbycat's SpeechTranscript structure."""
         full_text_parts: List[str] = []
         confidences: List[float] = []
         all_words: List[Dict[str, Any]] = []
 
-        for result in response.results:
+        results = getattr(response, 'results', []) or []
+        for result in results:
             if not result.alternatives:
                 continue
             alt = result.alternatives[0]
@@ -462,7 +619,8 @@ class GoogleSpeechClient(BaseSpeechToTextClient):
                 confidences.append(alt.confidence)
 
             # Process word timestamps and speaker tags
-            for word_info in alt.words:
+            words = getattr(alt, 'words', []) or []
+            for word_info in words:
                 start_sec = (
                     word_info.start_time.total_seconds()
                     if hasattr(word_info, 'start_time') and word_info.start_time
@@ -484,12 +642,10 @@ class GoogleSpeechClient(BaseSpeechToTextClient):
                     'confidence': round(word_conf, 3),
                 })
 
-        # Calculate overall metrics
         full_text = " ".join(full_text_parts).strip()
         overall_confidence = round(sum(confidences) / len(confidences), 3) if confidences else None
         duration = all_words[-1]['end'] if all_words else None
 
-        # Group words into speaker segments
         segments = self._group_words_into_segments(all_words)
 
         return {
@@ -501,7 +657,7 @@ class GoogleSpeechClient(BaseSpeechToTextClient):
             'metadata': {
                 'provider': 'google',
                 'word_count': len(all_words),
-                'total_results': len(response.results),
+                'total_results': len(results),
             },
         }
 

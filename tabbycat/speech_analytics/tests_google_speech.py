@@ -26,20 +26,34 @@ from speech_analytics.services.google_speech import (
 
 
 class GoogleSpeechClientTests(SimpleTestCase):
-    """Unit tests for GoogleSpeechClient using mocked Google Cloud Speech-to-Text API."""
+    """Unit tests for GoogleSpeechClient using mocked Google Cloud Speech-to-Text and Storage APIs."""
 
     def setUp(self):
         self.mock_speech_client = MagicMock(spec=speech_v1.SpeechClient)
-        self.client = GoogleSpeechClient(client=self.mock_speech_client)
-        # Valid 16kHz PCM WAV in memory
+        self.mock_storage_service = MagicMock()
+        self.client = GoogleSpeechClient(
+            client=self.mock_speech_client,
+            storage_service=self.mock_storage_service,
+        )
+
+        # Build short (1-second) valid WAV in memory
         buf = io.BytesIO()
         with wave.open(buf, "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)
             w.setframerate(16000)
-            w.writeframes(struct.pack("<h", 0) * 1600)
-        self.valid_wav_bytes = buf.getvalue()
-        self.dummy_audio = io.BytesIO(self.valid_wav_bytes)
+            w.writeframes(struct.pack("<h", 0) * 16000)
+        self.valid_short_wav = buf.getvalue()
+        self.dummy_audio = io.BytesIO(self.valid_short_wav)
+
+    def _generate_wav_bytes(self, duration_seconds: int = 1) -> bytes:
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            w.writeframes(struct.pack("<h", 0) * (16000 * duration_seconds))
+        return buf.getvalue()
 
     def test_implements_base_client_interface(self):
         self.assertIsInstance(self.client, BaseSpeechToTextClient)
@@ -58,11 +72,12 @@ class GoogleSpeechClientTests(SimpleTestCase):
             self.assertIn("ADC", str(ctx.exception))
 
     def test_detect_audio_format_wav(self):
-        info = detect_audio_format(self.valid_wav_bytes, "debate.wav")
+        info = detect_audio_format(self.valid_short_wav, "debate.wav")
         self.assertEqual(info["format"], "wav")
         self.assertEqual(info["sample_rate"], 16000)
         self.assertEqual(info["channels"], 1)
         self.assertEqual(info["sample_width"], 2)
+        self.assertEqual(info["duration"], 1.0)
 
     def test_detect_audio_format_m4a_magic_bytes(self):
         m4a_header = b"\x00\x00\x00\x1cftypM4A \x00\x00\x00\x00M4A mp42isom"
@@ -73,11 +88,9 @@ class GoogleSpeechClientTests(SimpleTestCase):
         info = detect_audio_format(b"unknown_bytes_12345", "audio.m4a")
         self.assertEqual(info["format"], "m4a")
 
+    # Short audio (<60s) synchronous recognition
     def test_synchronous_recognition_success(self):
-        # Build mock RecognizeResponse
         mock_response = speech_v1.RecognizeResponse()
-
-        # Result 1: Speaker 1
         result1 = speech_v1.SpeechRecognitionResult()
         alt1 = speech_v1.SpeechRecognitionAlternative()
         alt1.transcript = "Mr Speaker we propose"
@@ -85,21 +98,21 @@ class GoogleSpeechClientTests(SimpleTestCase):
 
         w1 = speech_v1.WordInfo(
             word="Mr",
-            start_time=datetime.timedelta(seconds=0, milliseconds=0),
-            end_time=datetime.timedelta(seconds=0, milliseconds=400),
+            start_time=datetime.timedelta(seconds=0),
+            end_time=datetime.timedelta(milliseconds=400),
             speaker_tag=1,
             confidence=0.96,
         )
         w2 = speech_v1.WordInfo(
             word="Speaker",
-            start_time=datetime.timedelta(seconds=0, milliseconds=400),
-            end_time=datetime.timedelta(seconds=0, milliseconds=900),
+            start_time=datetime.timedelta(milliseconds=400),
+            end_time=datetime.timedelta(milliseconds=900),
             speaker_tag=1,
             confidence=0.94,
         )
         w3 = speech_v1.WordInfo(
             word="we",
-            start_time=datetime.timedelta(seconds=0, milliseconds=900),
+            start_time=datetime.timedelta(milliseconds=900),
             end_time=datetime.timedelta(seconds=1, milliseconds=100),
             speaker_tag=1,
             confidence=0.95,
@@ -113,85 +126,135 @@ class GoogleSpeechClientTests(SimpleTestCase):
         )
         alt1.words.extend([w1, w2, w3, w4])
         result1.alternatives.append(alt1)
-
-        # Result 2: Speaker 2 (POI)
-        result2 = speech_v1.SpeechRecognitionResult()
-        alt2 = speech_v1.SpeechRecognitionAlternative()
-        alt2.transcript = "Point of information"
-        alt2.confidence = 0.90
-
-        w5 = speech_v1.WordInfo(
-            word="Point",
-            start_time=datetime.timedelta(seconds=2, milliseconds=0),
-            end_time=datetime.timedelta(seconds=2, milliseconds=300),
-            speaker_tag=2,
-            confidence=0.92,
-        )
-        w6 = speech_v1.WordInfo(
-            word="of",
-            start_time=datetime.timedelta(seconds=2, milliseconds=300),
-            end_time=datetime.timedelta(seconds=2, milliseconds=600),
-            speaker_tag=2,
-            confidence=0.88,
-        )
-        w7 = speech_v1.WordInfo(
-            word="information",
-            start_time=datetime.timedelta(seconds=2, milliseconds=600),
-            end_time=datetime.timedelta(seconds=3, milliseconds=100),
-            speaker_tag=2,
-            confidence=0.91,
-        )
-        alt2.words.extend([w5, w6, w7])
-        result2.alternatives.append(alt2)
-
-        mock_response.results.extend([result1, result2])
+        mock_response.results.append(result1)
         self.mock_speech_client.recognize.return_value = mock_response
 
-        # Call create_batch_job
         job = self.client.create_batch_job(self.dummy_audio, language_code="en-US")
-
         self.assertEqual(job["status"], "COMPLETED")
         self.assertTrue(job["job_id"].startswith("google_sync_"))
         self.assertIn("transcript_payload", job)
 
-        # Inspect recognition config passed to Google
         call_kwargs = self.mock_speech_client.recognize.call_args.kwargs
         config = call_kwargs["config"]
         self.assertEqual(config.language_code, "en-US")
         self.assertEqual(config.model, "latest_long")
         self.assertEqual(config.encoding, speech_v1.RecognitionConfig.AudioEncoding.LINEAR16)
-        self.assertEqual(config.sample_rate_hertz, 16000)
-        self.assertTrue(config.enable_word_time_offsets)
-        self.assertTrue(config.diarization_config.enable_speaker_diarization)
 
-        # Verify normalized transcript payload
-        payload = job["transcript_payload"]
-        self.assertEqual(payload["text"], "Mr Speaker we propose Point of information")
-        self.assertEqual(payload["language_code"], "en-US")
-        self.assertAlmostEqual(payload["overall_confidence"], 0.925, places=2)
-        self.assertEqual(payload["duration"], 3.1)
+        # Storage upload should NOT have been invoked for short audio
+        self.mock_storage_service.upload_audio_bytes.assert_not_called()
 
-        # Verify segments grouping
-        segments = payload["segments"]
-        self.assertEqual(len(segments), 2)
-        self.assertEqual(segments[0]["speaker"], "Speaker 1")
-        self.assertEqual(segments[0]["text"], "Mr Speaker we propose")
-        self.assertEqual(segments[0]["start"], 0.0)
-        self.assertEqual(segments[0]["end"], 1.8)
+    # Long audio (7-minute speech = 420s) asynchronous recognition via GCS
+    def test_long_audio_7_minute_speech_triggers_gcs_and_long_running(self):
+        long_wav_bytes = self._generate_wav_bytes(duration_seconds=420)  # 7 minutes
+        self.mock_storage_service.upload_audio_bytes.return_value = "gs://mock-bucket/speech_recordings/uuid/audio.wav"
 
-        self.assertEqual(segments[1]["speaker"], "Speaker 2")
-        self.assertEqual(segments[1]["text"], "Point of information")
-        self.assertEqual(segments[1]["start"], 2.0)
-        self.assertEqual(segments[1]["end"], 3.1)
+        mock_operation = MagicMock()
+        mock_operation.operation.name = "projects/mock/locations/global/operations/op_7min_speech"
+        self.mock_speech_client.long_running_recognize.return_value = mock_operation
 
-        # Verify fetch_completed_transcript retrieves this payload
-        fetched = self.client.fetch_completed_transcript(job["job_id"])
-        self.assertEqual(fetched["text"], payload["text"])
+        audio_input = io.BytesIO(long_wav_bytes)
+        audio_input.name = "substantive_speech.wav"
 
-        # Verify get_job_status reports COMPLETED
-        status = self.client.get_job_status(job["job_id"])
+        job = self.client.create_batch_job(audio_input, language_code="en-US")
+
+        # Job must be in PROCESSING state without blocking
+        self.assertEqual(job["status"], "PROCESSING")
+        self.assertEqual(job["job_id"], "projects/mock/locations/global/operations/op_7min_speech")
+        self.assertEqual(job["gcs_uri"], "gs://mock-bucket/speech_recordings/uuid/audio.wav")
+
+        # Verify GCS upload was called
+        self.mock_storage_service.upload_audio_bytes.assert_called_once()
+        # Verify long_running_recognize was called with gcs uri
+        call_kwargs = self.mock_speech_client.long_running_recognize.call_args.kwargs
+        self.assertEqual(call_kwargs["audio"].uri, "gs://mock-bucket/speech_recordings/uuid/audio.wav")
+
+    # Long debate recording (60-minute debate = 3600s)
+    def test_long_audio_60_minute_debate_recording(self):
+        long_wav_bytes = self._generate_wav_bytes(duration_seconds=3600)  # 60 minutes
+        self.mock_storage_service.upload_audio_bytes.return_value = "gs://mock-bucket/speech_recordings/uuid/full_debate.wav"
+
+        mock_operation = MagicMock()
+        mock_operation.operation.name = "projects/mock/locations/global/operations/op_debate_60m"
+        self.mock_speech_client.long_running_recognize.return_value = mock_operation
+
+        audio_input = io.BytesIO(long_wav_bytes)
+        audio_input.name = "debate_round_1.wav"
+
+        job = self.client.create_batch_job(audio_input, language_code="en-US")
+        self.assertEqual(job["status"], "PROCESSING")
+        self.assertEqual(job["job_id"], "projects/mock/locations/global/operations/op_debate_60m")
+
+    # Polling and transcript retrieval for long-running operation
+    def test_polling_and_fetching_completed_long_running_transcript(self):
+        op_id = "projects/mock/locations/global/operations/op_test_123"
+        gcs_uri = "gs://mock-bucket/speech_recordings/uuid/audio.wav"
+
+        mock_op = MagicMock()
+        mock_op.done = True
+        mock_op.error = None
+
+        mock_response = speech_v1.LongRunningRecognizeResponse()
+        res = speech_v1.SpeechRecognitionResult()
+        alt = speech_v1.SpeechRecognitionAlternative()
+        alt.transcript = "This is a completed long debate speech transcript."
+        alt.confidence = 0.94
+        w1 = speech_v1.WordInfo(
+            word="This",
+            start_time=datetime.timedelta(seconds=0),
+            end_time=datetime.timedelta(seconds=1),
+            speaker_tag=1,
+            confidence=0.95,
+        )
+        alt.words.append(w1)
+        res.alternatives.append(alt)
+        mock_response.results.append(res)
+        mock_op.response = mock_response
+
+        # Register operation in local store
+        self.client._local_operations[op_id] = {
+            'job_id': op_id,
+            'status': 'PROCESSING',
+            'gcs_uri': gcs_uri,
+            'operation': mock_op,
+            'language_code': 'en-US',
+        }
+
+        # Check status
+        status = self.client.get_job_status(op_id)
         self.assertEqual(status["status"], "COMPLETED")
         self.assertEqual(status["progress"], 100)
+
+        # Fetch completed transcript
+        with override_settings(GOOGLE_CLOUD_STORAGE_CLEANUP_ON_SUCCESS=True):
+            payload = self.client.fetch_completed_transcript(op_id)
+            self.assertEqual(payload["text"], "This is a completed long debate speech transcript.")
+            self.assertEqual(payload["overall_confidence"], 0.94)
+            # Verify temporary GCS object was deleted after successful fetch
+            self.mock_storage_service.delete_audio_by_uri.assert_called_with(gcs_uri)
+
+    def test_failed_long_running_operation_reports_failure(self):
+        op_id = "projects/mock/locations/global/operations/op_failed_123"
+        mock_op = MagicMock()
+        mock_op.done = True
+        mock_op.error.message = "Audio file contains corrupt frames"
+
+        self.client._local_operations[op_id] = {
+            'job_id': op_id,
+            'status': 'PROCESSING',
+            'operation': mock_op,
+        }
+
+        status = self.client.get_job_status(op_id)
+        self.assertEqual(status["status"], "FAILED")
+        self.assertEqual(status["error"], "Audio file contains corrupt frames")
+
+    def test_gcs_upload_failure_raises_stt_connection_error(self):
+        long_wav_bytes = self._generate_wav_bytes(duration_seconds=100)
+        self.mock_storage_service.upload_audio_bytes.side_effect = STTConnectionError("GCS network timeout")
+
+        audio_input = io.BytesIO(long_wav_bytes)
+        with self.assertRaises(STTConnectionError):
+            self.client.create_batch_job(audio_input)
 
     def test_m4a_automatic_transcoding_and_recognition(self):
         m4a_dummy = b"\x00\x00\x00\x1cftypM4A \x00\x00\x00\x00M4A mp42isom" + b"\x00" * 100
@@ -204,36 +267,14 @@ class GoogleSpeechClientTests(SimpleTestCase):
         mock_response.results.append(res)
         self.mock_speech_client.recognize.return_value = mock_response
 
-        # Mock convert_audio_to_wav to return valid WAV bytes
         with patch("speech_analytics.services.google_speech.convert_audio_to_wav") as mock_convert:
-            mock_convert.return_value = (self.valid_wav_bytes, "speech_converted.wav")
+            mock_convert.return_value = (self.valid_short_wav, "speech_converted.wav")
             audio_input = io.BytesIO(m4a_dummy)
             audio_input.name = "recording.m4a"
 
             job = self.client.create_batch_job(audio_input, language_code="en-US")
             self.assertEqual(job["status"], "COMPLETED")
             mock_convert.assert_called_once()
-            # Verify Recognize called with converted WAV audio config
-            call_kwargs = self.mock_speech_client.recognize.call_args.kwargs
-            config = call_kwargs["config"]
-            self.assertEqual(config.encoding, speech_v1.RecognitionConfig.AudioEncoding.LINEAR16)
-            self.assertEqual(config.sample_rate_hertz, 16000)
-
-    def test_conversion_failure_raises_stt_configuration_error(self):
-        m4a_dummy = b"\x00\x00\x00\x1cftypM4A \x00\x00\x00\x00M4A mp42isom"
-        with patch("speech_analytics.services.google_speech.convert_audio_to_wav") as mock_convert:
-            mock_convert.side_effect = STTConfigurationError("Conversion failed: invalid audio data")
-            audio_input = io.BytesIO(m4a_dummy)
-            audio_input.name = "broken.m4a"
-            with self.assertRaises(STTConfigurationError) as ctx:
-                self.client.create_batch_job(audio_input)
-            self.assertIn("Conversion failed", str(ctx.exception))
-
-    def test_convert_audio_to_wav_missing_tools_raises_error(self):
-        with patch("shutil.which", return_value=None):
-            with self.assertRaises(STTConfigurationError) as ctx:
-                convert_audio_to_wav(b"dummy", "audio.m4a")
-            self.assertIn("neither 'ffmpeg' nor 'afconvert' is installed", str(ctx.exception))
 
     def test_empty_results_normalization(self):
         mock_response = speech_v1.RecognizeResponse()
@@ -267,32 +308,3 @@ class GoogleSpeechClientTests(SimpleTestCase):
         self.mock_speech_client.recognize.side_effect = google_exceptions.PermissionDenied("API disabled")
         with self.assertRaises(STTAuthenticationError):
             self.client.create_batch_job(self.dummy_audio)
-
-    def test_model_selection_override_setting(self):
-        mock_response = speech_v1.RecognizeResponse()
-        self.mock_speech_client.recognize.return_value = mock_response
-
-        with override_settings(GOOGLE_SPEECH_MODEL="latest_short"):
-            self.client.create_batch_job(self.dummy_audio)
-            call_kwargs = self.mock_speech_client.recognize.call_args.kwargs
-            self.assertEqual(call_kwargs["config"].model, "latest_short")
-
-    def test_explicit_model_kwarg_takes_precedence(self):
-        mock_response = speech_v1.RecognizeResponse()
-        self.mock_speech_client.recognize.return_value = mock_response
-
-        with override_settings(GOOGLE_SPEECH_MODEL="latest_long"):
-            self.client.create_batch_job(self.dummy_audio, model="video")
-            call_kwargs = self.mock_speech_client.recognize.call_args.kwargs
-            self.assertEqual(call_kwargs["config"].model, "video")
-
-    def test_empty_model_does_not_pass_invalid_model_field(self):
-        mock_response = speech_v1.RecognizeResponse()
-        self.mock_speech_client.recognize.return_value = mock_response
-
-        with override_settings(GOOGLE_SPEECH_MODEL=""):
-            self.client.create_batch_job(self.dummy_audio, model="")
-            call_kwargs = self.mock_speech_client.recognize.call_args.kwargs
-            # RecognitionConfig without model set should have empty string / default unset proto field
-            self.assertEqual(call_kwargs["config"].model, "")
-

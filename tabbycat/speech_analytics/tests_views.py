@@ -1155,5 +1155,46 @@ class SpeechRecordingWorkflowTests(TestCase):
         self.assertTrue(SpeechTranscript.objects.filter(recording=recording).exists())
         self.assertEqual(recording.transcript.text, "Speech from M4A container.")
 
+    @override_settings(SPEECH_TRANSCRIPTION_PROVIDER="google")
+    @patch('speech_analytics.views.get_stt_client')
+    def test_google_provider_view_upload_long_audio_processing_state(self, mock_get_client):
+        mock_google_client = MagicMock()
+        mock_get_client.return_value = mock_google_client
+
+        # Long audio returns PROCESSING and operation name
+        mock_google_client.create_batch_job.return_value = {
+            'job_id': 'projects/mock/locations/global/operations/op_long_audio_789',
+            'status': 'PROCESSING',
+            'gcs_uri': 'gs://mock-bucket/speech_recordings/uuid/long_audio.wav',
+        }
+        mock_google_client.start_batch_job.return_value = {
+            'job_id': 'projects/mock/locations/global/operations/op_long_audio_789',
+            'status': 'PROCESSING',
+        }
+
+        upload_url = reverse('speech-recording-upload', kwargs={'tournament_slug': self.tournament.slug})
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+
+        audio = self._create_audio_file("long_speech.wav")
+        response = self.client.post(
+            upload_url,
+            {
+                'debate': self.debate.id,
+                'speaker': self.speaker1.id,
+                'audio_file': audio,
+            },
+            HTTP_REFERER=dashboard_url,
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertRedirects(response, dashboard_url)
+
+        recording = SpeechRecording.objects.get(debate=self.debate, speaker=self.speaker1)
+        self.assertEqual(recording.job_id, 'projects/mock/locations/global/operations/op_long_audio_789')
+        # Long audio should remain PROCESSING and transcript not created yet
+        self.assertEqual(recording.status, SpeechRecording.Status.PROCESSING)
+        self.assertFalse(SpeechTranscript.objects.filter(recording=recording).exists())
+
+
 
 

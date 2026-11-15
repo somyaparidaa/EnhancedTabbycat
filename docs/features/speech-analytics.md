@@ -134,7 +134,49 @@ env -u DEBUG pipenv run python manage.py makemigrations speech_analytics --check
 
 ---
 
-## 8. Stage 2: AI Debate Analysis Contract (v1.0.0)
+## 8. Stage 2: Long Audio & Google Cloud Speech Integration
+
+Stage 2 introduces production-ready long audio transcription support via Google Cloud Speech-to-Text v1 and Google Cloud Storage (GCS).
+
+### 8.1 Dual Synchronous & Long-Running Asynchronous Processing
+
+- **Short Audio (<= 60s and < 10MB)**: Uses synchronous `client.recognize()` directly on in-memory audio bytes, completing immediately during upload or retry without touching Cloud Storage.
+- **Long Audio (> 60s or >= 10MB)**: Uses Google Cloud Storage and `client.long_running_recognize()`.
+  1. The audio file is automatically transcoded to 16kHz mono `LINEAR16` WAV if uploaded in an unsupported container (e.g., M4A/AAC).
+  2. The transcoded audio is uploaded to a collision-resistant GCS path (`gs://<bucket_name>/speech_recordings/<uuid>/<filename>`).
+  3. A long-running recognition operation is started using Google Speech-to-Text API v1.
+  4. The operation ID (`projects/.../locations/global/operations/...`) is saved as the recording's `job_id`, and status remains `PROCESSING` without blocking the web request.
+  5. Status is polled non-blockingly through the existing "Check Status" view.
+  6. Upon completion, the full transcript, word timestamps, and diarized speaker segments are normalized and saved to `SpeechTranscript`.
+  7. The temporary GCS audio object is deleted only after the transcript is successfully persisted (configurable via `GOOGLE_CLOUD_STORAGE_CLEANUP_ON_SUCCESS`).
+
+### 8.2 Google Cloud Configuration & IAM Setup
+
+1. **Required Environment Variables**:
+   - `SPEECH_TRANSCRIPTION_PROVIDER="google"`: Activates Google Cloud Speech-to-Text.
+   - `GOOGLE_CLOUD_STORAGE_BUCKET_NAME="<your-gcs-bucket-name>"`: Dedicated bucket for temporary long-audio transcription objects.
+   - `GOOGLE_SPEECH_LANGUAGE_CODE="en-US"` (default `en-US`): Target speech language code.
+   - `GOOGLE_SPEECH_MODEL="latest_long"` (default `latest_long`): Google Speech v1 model optimized for debate speeches.
+   - `GOOGLE_CLOUD_STORAGE_CLEANUP_ON_SUCCESS="true"` (default `true`): Deletes temporary GCS audio objects after successful transcript persistence.
+
+2. **IAM Permissions**:
+   - The user/service account running Tabbycat (via ADC or service account) requires:
+     - `roles/storage.objectAdmin` or `roles/storage.objectUser` on the configured bucket.
+     - `roles/speech.client` on the Google Cloud project.
+   - Ensure the Google Cloud Speech service agent (`service-<project-number>@gcp-sa-speech.iam.gserviceaccount.com`) has read access to the bucket (`Storage Object Viewer`).
+
+3. **Testing Full Debate Audio**:
+   To test a full debate recording (e.g. 7-minute speech or 60-minute debate round):
+   ```bash
+   export SPEECH_TRANSCRIPTION_PROVIDER="google"
+   export GOOGLE_CLOUD_STORAGE_BUCKET_NAME="my-debate-audio-bucket"
+   export GOOGLE_SPEECH_MODEL="latest_long"
+   ```
+   Upload the audio via the tournament dashboard. The request will return immediately with status `Processing`. Click **Check Status** once processing finishes to view the complete transcript with diarized segments.
+
+---
+
+## 9. Stage 2.1: AI Debate Analysis Contract (v1.0.0)
 
 Stage 2 introduces structured, objective AI-powered competitive debate analysis. The analysis contract is decoupled from any specific generative model (such as Gnani Evon) and formalizes competitive debate evaluation dimensions.
 
