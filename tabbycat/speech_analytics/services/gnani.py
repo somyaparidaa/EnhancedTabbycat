@@ -10,6 +10,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from .base import BaseSpeechToTextClient
 from .exceptions import (
     GnaniAPIResponseError,
     GnaniAuthenticationError,
@@ -38,7 +39,7 @@ SENSITIVE_KEY_PATTERNS = {
 }
 
 
-class GnaniPrismaBatchClient:
+class GnaniPrismaBatchClient(BaseSpeechToTextClient):
     """Service client for Gnani Prisma v2.5 / v3.0 Batch Speech-to-Text API.
     Operates strictly server-side using configured credentials.
     """

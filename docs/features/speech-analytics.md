@@ -131,3 +131,37 @@ env -u DEBUG pipenv run python manage.py makemigrations speech_analytics --check
 1. **Live Provider Verification**: Automated tests run against mock fixtures. Live Gnani Prisma API integration requires a valid provisioned API key and live billing credits.
 2. **Diarization Speaker Mapping**: Diarized speaker segments (`Speaker 1`, `Speaker 2`) are parsed and rendered with timestamps and confidence scores when provided by the STT engine. However, the system does not attempt heuristic or automatic assignment of diarized labels to tournament speakers, preventing inaccurate debate speaker attributions.
 3. **No Deletion Operation**: In alignment with Tabbycat's auditing model, recordings cannot be permanently deleted from the web UI.
+
+---
+
+## 8. Stage 2: AI Debate Analysis Contract (v1.0.0)
+
+Stage 2 introduces structured, objective AI-powered competitive debate analysis. The analysis contract is decoupled from any specific generative model (such as Gnani Evon) and formalizes competitive debate evaluation dimensions.
+
+### 8.1 Output Structure & Dimensions
+
+The contract (`tabbycat/speech_analytics/schemas/debate_analysis_v1.json`) defines seven core substantive dimensions validated by `speech_analytics.contract`:
+
+1. **`metadata`**: Target speaker, debate format (e.g. `BP`, `Australs`), side, speech role, motion text, info slide, and `context_completeness` (`full_debate`, `partial_round`, or `isolated_speech`).
+2. **`argument_analysis`**: Constructive claims, underlying reasoning/mechanisms, analytical strengths, vulnerabilities, and unsupported claims or logical gaps.
+3. **`rebuttal_analysis`**: Targets opposing arguments, classifying engagement type (`direct_rebuttal`, `counter_framing`, `mere_mention`, `mitigation`, `turning_the_argument`), logical effectiveness, and missed rebuttal opportunities. Crucially distinguishes actual refutation from mere superficial mention.
+4. **`clash_analysis`**: Central disagreements in the debate, speaker positioning, comparative weighing metrics (scale, reversibility, likelihood), and unaddressed dimensions.
+5. **`role_fulfilment`**: Expected normative responsibilities for the speech position and format, fulfilled duties, and missing or insufficiently addressed responsibilities.
+6. **`structure_analysis`**: Organisation and progression, logical coherence, signposting/transitions, and time management pacing.
+7. **`feedback`**: Actionable constructive feedback divided into strengths, areas for improvement, and actionable suggestions.
+8. **`limitations`**: Explicit accounting of missing debate context (e.g. unrecorded prior speeches or POIs), inaudible audio / transcript gaps, uncertain interpretations, and unevaluated dimensions (e.g. delivery, body language).
+
+### 8.2 Evidence & Provenance Handling
+
+Every observation across arguments, rebuttals, clashes, role fulfilment, and structure must ground itself in verifiable evidence via `EvidenceReference`:
+- **Verbatim Excerpt**: `quote` referencing the source transcript text.
+- **Provenance Source**: `source` indicating whether the excerpt originates from `target_speech`, `prior_speech`, `subsequent_speech`, or `motion_context`. This enables evaluating rebuttals against actual speeches earlier in the debate without fabricating opposition claims.
+- **Timestamps**: Optional audio start/end offsets (`start_time`, `end_time`) with strict ordering validation (`start_time <= end_time`).
+- **Observation Type**: Explicit classification as `direct_observation` (cited fact/quote) versus `model_interpretation` (AI analytical inference).
+
+### 8.3 Context Completeness & Future Analytics
+
+Competitive debate analysis requires full round context to evaluate refutations, extensions, and clash weighing fairly. The contract represents missing information explicitly (`context_completeness: "isolated_speech"` vs `"full_debate"`):
+- The model must never construe the absence of an unprovided speech as proof that a speaker failed to respond to it.
+- The contract strictly forbids arbitrary numerical overall scores, speaker points, or debate rankings, preserving debate adjudication integrity while providing actionable qualitative analytics for speaker development.
+

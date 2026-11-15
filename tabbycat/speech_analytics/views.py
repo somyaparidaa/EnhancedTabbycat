@@ -16,6 +16,7 @@ from utils.mixins import AdministratorMixin
 
 from .forms import SpeechRecordingUploadForm
 from .models import SpeechRecording, SpeechTranscript
+from .services import STTError, get_stt_client
 from .services.exceptions import GnaniSTTError
 from .services.gnani import GnaniPrismaBatchClient
 
@@ -81,30 +82,60 @@ class SpeechRecordingUploadView(AdministratorMixin, TournamentMixin, FormView):
         recording.status = SpeechRecording.Status.PENDING
         recording.save()
 
-        # Submit recording through Gnani Prisma Batch STT client
+        # Submit recording through active Speech-to-Text provider
         try:
-            client = GnaniPrismaBatchClient()
+            # Submit recording through active Speech-to-Text provider
+            provider = getattr(settings, 'SPEECH_TRANSCRIPTION_PROVIDER', 'gnani')
+            if provider == 'gnani':
+                client = GnaniPrismaBatchClient()
+                job_kwargs = {
+                    'language_code': 'en-IN',
+                    'model': 'prisma-v2.5',
+                }
+            else:
+                client = get_stt_client()
+                job_kwargs = {
+                    'language_code': getattr(settings, 'GOOGLE_SPEECH_LANGUAGE_CODE', 'en-US'),
+                }
+                google_model = getattr(settings, 'GOOGLE_SPEECH_MODEL', None)
+                if google_model:
+                    job_kwargs['model'] = google_model
+
             job_info = client.create_batch_job(
                 audio_file=recording.audio_file.file,
-                language_code="en-IN",
-                model="prisma-v2.5",
+                **job_kwargs,
             )
             job_id = job_info.get('job_id')
             if not job_id:
-                raise GnaniSTTError("No job_id returned by Gnani API on job creation.")
+                raise STTError("No job_id returned by STT provider on job creation.")
 
             # Save job_id immediately after successful creation
             recording.job_id = str(job_id)
             recording.error_message = ""
             recording.save(update_fields=['job_id', 'error_message', 'updated_at'])
 
-            # Trigger job execution
-            client.start_batch_job(recording.job_id)
-            recording.status = SpeechRecording.Status.PROCESSING
-            recording.save(update_fields=['status', 'updated_at'])
+            # If synchronous recognition already completed (e.g. Google short audio)
+            if job_info.get('status') == 'COMPLETED' and job_info.get('transcript_payload'):
+                transcript_payload = job_info['transcript_payload']
+                with transaction.atomic():
+                    SpeechTranscript.objects.update_or_create(
+                        recording=recording,
+                        defaults={
+                            'text': transcript_payload.get('text', ''),
+                            'language_code': transcript_payload.get('language_code', 'en'),
+                            'metadata': transcript_payload.get('metadata'),
+                        },
+                    )
+                    recording.status = SpeechRecording.Status.COMPLETED
+                    recording.save(update_fields=['status', 'updated_at'])
+            else:
+                # Trigger job execution
+                client.start_batch_job(recording.job_id)
+                recording.status = SpeechRecording.Status.PROCESSING
+                recording.save(update_fields=['status', 'updated_at'])
 
-        except GnaniSTTError as exc:
-            logger.warning("Gnani STT submission failed for recording #%s: %s", recording.pk, exc.message)
+        except (STTError, GnaniSTTError) as exc:
+            logger.warning("STT submission failed for recording #%s: %s", recording.pk, exc.message)
             recording.status = SpeechRecording.Status.FAILED
             recording.error_message = exc.message
             recording.save(update_fields=['status', 'error_message', 'updated_at'])
@@ -226,8 +257,8 @@ class SpeechRecordingStatusCheckView(AdministratorMixin, TournamentMixin, View):
                 'error': recording.error_message or _("No active transcription job associated with this recording."),
             })
 
-        # 3. Poll status from Gnani Batch STT
-        client = GnaniPrismaBatchClient()
+        # 3. Poll status from active Speech-to-Text provider
+        client = GnaniPrismaBatchClient() if getattr(settings, 'SPEECH_TRANSCRIPTION_PROVIDER', 'gnani') == 'gnani' else get_stt_client()
         try:
             status_data = client.get_job_status(recording.job_id)
             job_status = (status_data.get('status') or '').upper()
@@ -266,7 +297,7 @@ class SpeechRecordingStatusCheckView(AdministratorMixin, TournamentMixin, View):
                     recording.status = SpeechRecording.Status.PROCESSING
                     recording.save(update_fields=['status', 'updated_at'])
 
-        except GnaniSTTError as exc:
+        except (STTError, GnaniSTTError) as exc:
             logger.warning("Status check failed for recording #%s: %s", recording.pk, exc.message)
             if is_html:
                 return self._redirect_html(request, _("Failed to check status: %s") % exc.message, messages.ERROR)
@@ -479,29 +510,59 @@ class SpeechRecordingRetryView(AdministratorMixin, TournamentMixin, View):
             locked_rec.save(update_fields=['status', 'error_message', 'updated_at'])
             recording = locked_rec
 
-        # Outside row lock / transaction, submit new batch job to Gnani API
+        # Outside row lock / transaction, submit new batch job to active STT provider
         try:
-            client = GnaniPrismaBatchClient()
+            # Submit recording through active Speech-to-Text provider
+            provider = getattr(settings, 'SPEECH_TRANSCRIPTION_PROVIDER', 'gnani')
+            if provider == 'gnani':
+                client = GnaniPrismaBatchClient()
+                job_kwargs = {
+                    'language_code': 'en-IN',
+                    'model': 'prisma-v2.5',
+                }
+            else:
+                client = get_stt_client()
+                job_kwargs = {
+                    'language_code': getattr(settings, 'GOOGLE_SPEECH_LANGUAGE_CODE', 'en-US'),
+                }
+                google_model = getattr(settings, 'GOOGLE_SPEECH_MODEL', None)
+                if google_model:
+                    job_kwargs['model'] = google_model
+
             job_info = client.create_batch_job(
                 audio_file=recording.audio_file.file,
-                language_code="en-IN",
-                model="prisma-v2.5",
+                **job_kwargs,
             )
             new_job_id = job_info.get('job_id')
             if not new_job_id:
-                raise GnaniSTTError("No job_id returned by Gnani API on retry creation.")
+                raise STTError("No job_id returned by STT provider on retry creation.")
 
             # Record new job ID
             recording.job_id = str(new_job_id)
             recording.error_message = ""
             recording.save(update_fields=['job_id', 'error_message', 'updated_at'])
 
-            # Start execution of the new job
-            client.start_batch_job(recording.job_id)
-            recording.status = SpeechRecording.Status.PROCESSING
-            recording.save(update_fields=['status', 'updated_at'])
+            # If synchronous recognition already completed
+            if job_info.get('status') == 'COMPLETED' and job_info.get('transcript_payload'):
+                transcript_payload = job_info['transcript_payload']
+                with transaction.atomic():
+                    SpeechTranscript.objects.update_or_create(
+                        recording=recording,
+                        defaults={
+                            'text': transcript_payload.get('text', ''),
+                            'language_code': transcript_payload.get('language_code', 'en'),
+                            'metadata': transcript_payload.get('metadata'),
+                        },
+                    )
+                    recording.status = SpeechRecording.Status.COMPLETED
+                    recording.save(update_fields=['status', 'updated_at'])
+            else:
+                # Start execution of the new job
+                client.start_batch_job(recording.job_id)
+                recording.status = SpeechRecording.Status.PROCESSING
+                recording.save(update_fields=['status', 'updated_at'])
 
-        except GnaniSTTError as exc:
+        except (STTError, GnaniSTTError) as exc:
             logger.warning("Retry submission failed for recording #%s: %s", recording.pk, exc.message)
             recording.status = SpeechRecording.Status.FAILED
             recording.error_message = exc.message

@@ -1,0 +1,150 @@
+{
+  "schema_version": "1.0.0",
+  "metadata": {
+    "target_speaker_name": "Taylor Brooks",
+    "target_team_side": "Negative",
+    "target_speech_role": "2nd Negative",
+    "debate_format": "Australs",
+    "motion": "This House supports universal basic income.",
+    "info_slide": null,
+    "context_completeness": "isolated_speech",
+    "available_speech_roles": [
+      "2nd Negative"
+    ],
+    "model_identifier": "evon-debate-v1",
+    "generated_at": "2026-11-10T12:30:00Z"
+  },
+  "argument_analysis": [
+    {
+      "claim": "UBI causes catastrophic inflationary pressures on non-elastic goods like housing.",
+      "reasoning": "Landlords in supply-constrained urban markets capture disposable income increases through rent increases, leaving recipients in no better real position.",
+      "strengths": [
+        "Identified inelastic supply curves as a boundary condition on consumer cash transfers."
+      ],
+      "weaknesses": [
+        "Assumed housing markets respond with 100% rent extraction without considering regional mobility."
+      ],
+      "unsupported_claims_or_gaps": [
+        "No evidence offered for why zoning or rent stabilization would be ineffective."
+      ],
+      "evidence": [
+        {
+          "source": "target_speech",
+          "speaker_identifier": "Taylor Brooks",
+          "speech_role": "2nd Negative",
+          "quote": "If everyone receives a thousand dollars, landlords know everyone can pay a thousand more, and rent adjusts immediately.",
+          "start_time": null,
+          "end_time": null,
+          "observation_type": "direct_observation",
+          "notes": "Timestamp unrecorded in transcript metadata."
+        }
+      ]
+    }
+  ],
+  "rebuttal_analysis": [
+    {
+      "target_argument": "Affirmative's assertion that UBI increases entrepreneurship.",
+      "target_speaker_or_side": "1st Affirmative",
+      "engagement_type": "direct_rebuttal",
+      "response_summary": "Argued that capital constraints for small businesses far exceed living stipends, and unconditional cash without mentorship has low venture success rates.",
+      "effectiveness": "moderate",
+      "missed_rebuttal_opportunities": [
+        "Did not address low-risk freelancing or creative pursuits mentioned as entrepreneurial."
+      ],
+      "evidence": [
+        {
+          "source": "target_speech",
+          "speaker_identifier": "Taylor Brooks",
+          "speech_role": "2nd Negative",
+          "quote": "A living stipend doesn't buy a storefront or equipment; serious entrepreneurship requires debt finance.",
+          "start_time": null,
+          "end_time": null,
+          "observation_type": "direct_observation",
+          "notes": "Direct response to Affirmative case."
+        }
+      ]
+    }
+  ],
+  "clash_analysis": [
+    {
+      "clash_theme": "Poverty alleviation effectiveness vs. economic distortion",
+      "speaker_engagement": "Positioned the negative case around targeted welfare efficiency over universal distribution.",
+      "comparative_weighing": "Weighed progressive targeted aid against regressive universal cash dilution.",
+      "unaddressed_dimensions": [
+        "Unaddressed stigma and means-testing overhead costs raised by affirmative."
+      ],
+      "evidence": [
+        {
+          "source": "target_speech",
+          "speaker_identifier": "Taylor Brooks",
+          "speech_role": "2nd Negative",
+          "quote": "Targeted transfers put limited public revenue directly into the hands of the bottom decile rather than billionaires.",
+          "start_time": null,
+          "end_time": null,
+          "observation_type": "direct_observation",
+          "notes": "Targeted welfare comparative."
+        }
+      ]
+    }
+  ],
+  "role_fulfilment": {
+    "expected_responsibilities": [
+      "Rebut 1st and 2nd Affirmative cases.",
+      "Defend and extend 1st Negative arguments.",
+      "Consolidate the Negative team line."
+    ],
+    "fulfilled_responsibilities": [
+      "Extended 1st Negative economic critiques into housing and inflation.",
+      "Rebutted affirmative claims regarding economic security."
+    ],
+    "missing_or_insufficient_responsibilities": [
+      "Evaluation is limited because prior Affirmative and 1st Negative speeches were unavailable."
+    ],
+    "format_specific_notes": "Australs 3v3 format requires the 2nd speaker to divide time roughly 50/50 between rebuttal and substantive extension.",
+    "evidence": [
+      {
+        "source": "target_speech",
+        "speaker_identifier": "Taylor Brooks",
+        "speech_role": "2nd Negative",
+        "quote": "Building on what my first speaker demonstrated regarding fiscal deficits...",
+        "start_time": null,
+        "end_time": null,
+        "observation_type": "direct_observation",
+        "notes": "Evidence of extension."
+      }
+    ]
+  },
+  "structure_analysis": {
+    "organization_and_progression": "Clear division between rebuttal (first half) and negative extension (second half).",
+    "clarity_and_coherence": "High verbal clarity and logical sequencing.",
+    "transitions_and_signposting": "Clear signposts between refutation and substantive case.",
+    "time_management_notes": null,
+    "evidence": []
+  },
+  "feedback": {
+    "strengths": [
+      "Strong analytical intuition regarding inelastic supply in urban housing markets."
+    ],
+    "areas_for_improvement": [
+      "Explicitly quantify or model how targeted welfare avoids welfare cliffs, an obvious counter-argument."
+    ],
+    "actionable_suggestions": [
+      "Anchor the targeted welfare alternative in specific examples of existing programs with proven low administrative leakage."
+    ]
+  },
+  "limitations": {
+    "missing_debate_context": [
+      "Only the 2nd Negative speech transcript was available. Speeches by 1st Affirmative, 1st Negative, 2nd Affirmative, and 3rd speakers were absent.",
+      "Because prior affirmative arguments could not be reviewed directly, affirmative claims are inferred solely from what the speaker addressed.",
+      "Absence of prior speeches must NOT be construed as proof that the speaker ignored points they were not documented hearing."
+    ],
+    "insufficient_transcript_evidence": [],
+    "uncertain_interpretations": [
+      "Whether the speaker was responding to the 1st or 2nd Affirmative on entrepreneurship is uncertain from the transcript alone."
+    ],
+    "unevaluated_dimensions": [
+      "Debate result, margin, and speaker marks were not generated.",
+      "Non-verbal delivery and speaking speed could not be evaluated due to absence of audio timestamps."
+    ]
+  }
+}

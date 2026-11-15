@@ -451,16 +451,27 @@ PUSH_NOTIFICATIONS_SETTINGS = {
 ENABLE_PUSH_NOTIFICATIONS = os.environ.get("WP_PRIVATE_KEY") is not None
 
 # ==============================================================================
-# Speech Analytics & Speech-to-Text (Gnani AI Prisma)
+# Speech Analytics & Speech-to-Text Providers
 # ==============================================================================
 
+# Active transcription provider ('gnani' or 'google')
+SPEECH_TRANSCRIPTION_PROVIDER = os.environ.get('SPEECH_TRANSCRIPTION_PROVIDER', 'gnani')
+
+# Google Cloud Speech-to-Text Configuration
+GOOGLE_SPEECH_LANGUAGE_CODE = os.environ.get('GOOGLE_SPEECH_LANGUAGE_CODE', 'en-US')
+GOOGLE_SPEECH_MODEL = os.environ.get('GOOGLE_SPEECH_MODEL', 'latest_long')
+
+# Gnani AI Prisma Configuration
 GNANI_API_KEY = os.environ.get('GNANI_API_KEY', '')
 GNANI_API_BASE_URL = os.environ.get('GNANI_API_BASE_URL', 'https://api.vachana.ai')
 GNANI_API_TIMEOUT = (
     int(os.environ.get('GNANI_CONNECT_TIMEOUT', 10)),
     int(os.environ.get('GNANI_READ_TIMEOUT', 60)),
 )
+
+# Audio Upload Constraints
 SPEECH_ANALYTICS_MAX_UPLOAD_SIZE = int(os.environ.get('SPEECH_MAX_UPLOAD_SIZE', 100 * 1024 * 1024))  # 100 MB default
 SPEECH_ANALYTICS_ALLOWED_EXTENSIONS = ('.wav', '.mp3', '.m4a', '.ogg', '.flac', '.aac')
+
 
 

@@ -1,0 +1,203 @@
+{
+  "schema_version": "1.0.0",
+  "metadata": {
+    "target_speaker_name": "Samira Khan",
+    "target_team_side": "Opening Government",
+    "target_speech_role": "Prime Minister",
+    "debate_format": "BP",
+    "motion": "This House would ban the commercial sale of deep-sea minerals.",
+    "info_slide": "Deep-sea mining involves extracting mineral deposits from the ocean floor beyond national jurisdictions.",
+    "context_completeness": "full_debate",
+    "available_speech_roles": [
+      "Prime Minister",
+      "Leader of Opposition",
+      "Deputy Prime Minister",
+      "Deputy Leader of Opposition",
+      "Member of Government",
+      "Member of Opposition",
+      "Government Whip",
+      "Opposition Whip"
+    ],
+    "model_identifier": "evon-debate-v1",
+    "generated_at": "2026-11-10T12:00:00Z"
+  },
+  "argument_analysis": [
+    {
+      "claim": "Deep-sea ecosystems suffer irreversible, catastrophic biodiversity loss from commercial dredging.",
+      "reasoning": "The abyssal plains have extremely slow regeneration rates, meaning sediment plumes and physical scraping destroy benthic organisms that take millions of years to recover.",
+      "strengths": [
+        "Strong mechanism explaining why deep sea species cannot adapt to rapid sediment disruptions.",
+        "Clear comparative distinction between terrestrial and oceanic ecosystem recovery timelines."
+      ],
+      "weaknesses": [
+        "Did not quantify the geographic scope of dredging compared to terrestrial mining footprints."
+      ],
+      "unsupported_claims_or_gaps": [
+        "Asserted that zero restoration technologies could ever be developed without citing technical or physical impossibilities."
+      ],
+      "evidence": [
+        {
+          "source": "target_speech",
+          "speaker_identifier": "Samira Khan",
+          "speech_role": "Prime Minister",
+          "quote": "Benthic flora and fauna exist in high-pressure equilibrium; when plumes suffocate them, they take millennia to regenerate.",
+          "start_time": 45.2,
+          "end_time": 56.8,
+          "observation_type": "direct_observation",
+          "notes": "Directly stated during opening constructive."
+        }
+      ]
+    }
+  ],
+  "rebuttal_analysis": [
+    {
+      "target_argument": "Green transition requires rare earth minerals that deep-sea mining uniquely provides.",
+      "target_speaker_or_side": "Leader of Opposition",
+      "engagement_type": "turning_the_argument",
+      "response_summary": "Argued that circular economy battery recycling and terrestrial stockpiles are already sufficient, and allowing seabed mining disincentivizes battery chemistry innovation.",
+      "effectiveness": "strong",
+      "missed_rebuttal_opportunities": [
+        "Did not address the short-term transition supply bottleneck pointed out by the Leader of Opposition."
+      ],
+      "evidence": [
+        {
+          "source": "prior_speech",
+          "speaker_identifier": "Leader of Opposition",
+          "speech_role": "Leader of Opposition",
+          "quote": "Without cobalt from Clarion-Clipperton, electric vehicle scaling stalls by 2030.",
+          "start_time": 110.0,
+          "end_time": 118.5,
+          "observation_type": "direct_observation",
+          "notes": "Opposing argument established in LO speech."
+        },
+        {
+          "source": "target_speech",
+          "speaker_identifier": "Samira Khan",
+          "speech_role": "Prime Minister",
+          "quote": "Relying on dredging removes market pressure to invest in solid-state and sodium-ion alternatives.",
+          "start_time": 182.1,
+          "end_time": 196.4,
+          "observation_type": "direct_observation",
+          "notes": "Direct turn of the transition necessity argument."
+        }
+      ]
+    },
+    {
+      "target_argument": "International Seabed Authority (ISA) regulatory frameworks are adequate safeguards.",
+      "target_speaker_or_side": "Opposition",
+      "engagement_type": "mere_mention",
+      "response_summary": "Dismissed the ISA as weak without explaining why its enforcement mechanisms in international waters fail.",
+      "effectiveness": "weak",
+      "missed_rebuttal_opportunities": [
+        "Failed to explain why ISA voting rules lead to regulatory capture."
+      ],
+      "evidence": [
+        {
+          "source": "target_speech",
+          "speaker_identifier": "Samira Khan",
+          "speech_role": "Prime Minister",
+          "quote": "And of course, we all know the ISA has no teeth out in international waters.",
+          "start_time": 240.0,
+          "end_time": 244.2,
+          "observation_type": "direct_observation",
+          "notes": "Asserted weakness without mechanism."
+        }
+      ]
+    }
+  ],
+  "clash_analysis": [
+    {
+      "clash_theme": "Ecological permanence vs. immediate green technology mineral demands",
+      "speaker_engagement": "Positioned the debate around the asymmetry of irreversible extinction versus solvable engineering transitions.",
+      "comparative_weighing": "Used the metric of reversibility: terrestrial damage can theoretically be remediated and battery technologies can substitute minerals, but deep oceanic habitat collapse cannot be reversed.",
+      "unaddressed_dimensions": [
+        "Did not weigh against the human rights costs of terrestrial cobalt extraction highlighted in Opposition speeches."
+      ],
+      "evidence": [
+        {
+          "source": "target_speech",
+          "speaker_identifier": "Samira Khan",
+          "speech_role": "Prime Minister",
+          "quote": "You can plant trees or reform land mines; you cannot vacuum sediment back onto benthic crust.",
+          "start_time": 312.0,
+          "end_time": 322.4,
+          "observation_type": "direct_observation",
+          "notes": "Comparative metric explicit in peroration."
+        }
+      ]
+    }
+  ],
+  "role_fulfilment": {
+    "expected_responsibilities": [
+      "Set up a clear, fair debate model and definitions.",
+      "Provide positive constructive arguments for banning commercial exploitation.",
+      "Preempt obvious opposition clashes regarding mineral scarcity."
+    ],
+    "fulfilled_responsibilities": [
+      "Explicitly clarified the scope of the commercial ban versus scientific research exemptions.",
+      "Established foundational environmental harms that anchored the Opening Government case."
+    ],
+    "missing_or_insufficient_responsibilities": [
+      "Failed to preempt the terrestrial mining human rights trade-off that was central to the Leader of Opposition case."
+    ],
+    "format_specific_notes": "In British Parliamentary, as Prime Minister, establishing an airtight definition is vital; the model was well defined with scientific exemptions.",
+    "evidence": [
+      {
+        "source": "target_speech",
+        "speaker_identifier": "Samira Khan",
+        "speech_role": "Prime Minister",
+        "quote": "Our model specifically targets commercial extraction contracts; exploration for pure academic research remains permitted.",
+        "start_time": 22.0,
+        "end_time": 33.5,
+        "observation_type": "direct_observation",
+        "notes": "Model setup in the first minute."
+      }
+    ]
+  },
+  "structure_analysis": {
+    "organization_and_progression": "Standard Prime Minister speech structure: model setup (0:00-1:00), constructive argument 1 on biodiversity (1:00-3:30), constructive argument 2 on technological substitution (3:30-5:45), preemption and conclusion (5:45-7:00).",
+    "clarity_and_coherence": "High; each point was clearly distinguished and followed a logical chain from mechanism to impact.",
+    "transitions_and_signposting": "Used explicit verbal numbering ('Our first contention relates to ecological irreversibility... moving to our second claim on battery innovation').",
+    "time_management_notes": "Paced well across the 7 minutes, though spent only 40 seconds on ISA regulatory capture which left that point vulnerable.",
+    "evidence": [
+      {
+        "source": "target_speech",
+        "speaker_identifier": "Samira Khan",
+        "speech_role": "Prime Minister",
+        "quote": "Moving now to our second substantive argument on technological substitution...",
+        "start_time": 210.0,
+        "end_time": 214.5,
+        "observation_type": "direct_observation",
+        "notes": "Signposting transition."
+      }
+    ]
+  },
+  "feedback": {
+    "strengths": [
+      "Compelling and intuitive weighing on reversibility vs temporary market transition costs.",
+      "Clear, defensible model that avoided unnecessary over-banning of scientific exploration."
+    ],
+    "areas_for_improvement": [
+      "Do not dismiss regulatory bodies (ISA) with mere assertions; detail why their inspection and enforcement powers are structurally compromised.",
+      "Directly engage with the human cost of terrestrial mining rather than ignoring Opposition's clash point."
+    ],
+    "actionable_suggestions": [
+      "In future opening speeches, dedicate at least 60 seconds to explicitly comparing your proposed environmental harm against the alternative harms the opposition is guaranteed to run."
+    ]
+  },
+  "limitations": {
+    "missing_debate_context": [
+      "POIs offered by Opposition during the Prime Minister speech were partially inaudible and could not be fully evaluated."
+    ],
+    "insufficient_transcript_evidence": [
+      "Audio dropout between 4:12 and 4:18 obscured one statistical reference regarding ocean floor mapping percentages."
+    ],
+    "uncertain_interpretations": [
+      "Whether the speaker's comment at 6:15 was intended as a standalone argument or an extension of the battery recycling point is ambiguous from the transcript phrasing."
+    ],
+    "unevaluated_dimensions": [
+      "Vocal inflection, rhetorical delivery, and eye contact were not evaluated as analysis is restricted to verbal transcript text and timing data.",
+      "Adjudication decisions and team rankings were not generated."
+    ]
+  }
+}

@@ -1051,3 +1051,109 @@ class SpeechRecordingWorkflowTests(TestCase):
         self.assertIn("form.dataset.submitting = 'true'", content_detail)
         self.assertNotIn("btn.classList.contains('disabled') || btn.disabled", content_detail)
 
+    # 36. Google Speech provider integration via views
+    @override_settings(SPEECH_TRANSCRIPTION_PROVIDER="google")
+    @patch('speech_analytics.views.get_stt_client')
+    def test_google_provider_view_upload_and_synchronous_completion(self, mock_get_client):
+        mock_google_client = MagicMock()
+        mock_get_client.return_value = mock_google_client
+
+        mock_google_client.create_batch_job.return_value = {
+            'job_id': 'google_sync_test_123',
+            'status': 'COMPLETED',
+            'transcript_payload': {
+                'text': "Mr Speaker, we propose the motion.",
+                'language_code': 'en-US',
+                'duration': 12.5,
+                'overall_confidence': 0.96,
+                'segments': [
+                    {
+                        'speaker': 'Speaker 1',
+                        'text': 'Mr Speaker, we propose the motion.',
+                        'start': 0.0,
+                        'end': 12.5,
+                        'confidence': 0.96,
+                    }
+                ],
+                'metadata': {'provider': 'google'},
+            },
+        }
+
+        upload_url = reverse('speech-recording-upload', kwargs={'tournament_slug': self.tournament.slug})
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+
+        audio = self._create_audio_file("google_test.wav")
+        response = self.client.post(
+            upload_url,
+            {
+                'debate': self.debate.id,
+                'speaker': self.speaker1.id,
+                'audio_file': audio,
+            },
+            HTTP_REFERER=dashboard_url,
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertRedirects(response, dashboard_url)
+
+        recording = SpeechRecording.objects.get(debate=self.debate, speaker=self.speaker1)
+        self.assertEqual(recording.job_id, 'google_sync_test_123')
+        # Since synchronous recognition finishes immediately, status should be COMPLETED and transcript saved
+        self.assertEqual(recording.status, SpeechRecording.Status.COMPLETED)
+        self.assertTrue(SpeechTranscript.objects.filter(recording=recording).exists())
+        self.assertEqual(recording.transcript.text, "Mr Speaker, we propose the motion.")
+        self.assertEqual(recording.transcript.language_code, "en-US")
+
+    @override_settings(SPEECH_TRANSCRIPTION_PROVIDER="google")
+    @patch('speech_analytics.views.get_stt_client')
+    def test_google_provider_view_upload_m4a_success(self, mock_get_client):
+        mock_google_client = MagicMock()
+        mock_get_client.return_value = mock_google_client
+
+        mock_google_client.create_batch_job.return_value = {
+            'job_id': 'google_sync_m4a_456',
+            'status': 'COMPLETED',
+            'transcript_payload': {
+                'text': "Speech from M4A container.",
+                'language_code': 'en-US',
+                'duration': 5.0,
+                'overall_confidence': 0.95,
+                'segments': [
+                    {
+                        'speaker': 'Speaker 1',
+                        'text': 'Speech from M4A container.',
+                        'start': 0.0,
+                        'end': 5.0,
+                        'confidence': 0.95,
+                    }
+                ],
+                'metadata': {'provider': 'google'},
+            },
+        }
+
+        upload_url = reverse('speech-recording-upload', kwargs={'tournament_slug': self.tournament.slug})
+        dashboard_url = reverse('speech-analytics-dashboard', kwargs={'tournament_slug': self.tournament.slug})
+
+        m4a_content = b"\x00\x00\x00\x1cftypM4A \x00\x00\x00\x00M4A mp42isom" + b"\x00" * 64
+        audio = self._create_audio_file("debate.m4a", content=m4a_content, content_type="audio/mp4")
+        response = self.client.post(
+            upload_url,
+            {
+                'debate': self.debate.id,
+                'speaker': self.speaker2.id,
+                'audio_file': audio,
+            },
+            HTTP_REFERER=dashboard_url,
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertRedirects(response, dashboard_url)
+
+        recording = SpeechRecording.objects.get(debate=self.debate, speaker=self.speaker2)
+        self.assertEqual(recording.job_id, 'google_sync_m4a_456')
+        self.assertEqual(recording.status, SpeechRecording.Status.COMPLETED)
+        self.assertTrue(SpeechTranscript.objects.filter(recording=recording).exists())
+        self.assertEqual(recording.transcript.text, "Speech from M4A container.")
+
+
+

@@ -1,0 +1,406 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tabbycat.org/schemas/debate-analysis/v1.json",
+  "title": "DebateSpeechAnalysisV1",
+  "description": "Structured schema for version 1 of AI-powered competitive debate speech analysis with explicit debate context and provenance evidence.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "metadata",
+    "argument_analysis",
+    "rebuttal_analysis",
+    "clash_analysis",
+    "role_fulfilment",
+    "structure_analysis",
+    "feedback",
+    "limitations"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "The exact contract version string."
+    },
+    "metadata": {
+      "$ref": "#/$defs/AnalysisMetadata"
+    },
+    "argument_analysis": {
+      "type": "array",
+      "description": "Substantive claims and constructive arguments developed in the speech.",
+      "items": {
+        "$ref": "#/$defs/ArgumentItem"
+      }
+    },
+    "rebuttal_analysis": {
+      "type": "array",
+      "description": "Assessment of engagements and responses to opposing arguments.",
+      "items": {
+        "$ref": "#/$defs/RebuttalItem"
+      }
+    },
+    "clash_analysis": {
+      "type": "array",
+      "description": "Central points of disagreement in the debate and comparative weighing.",
+      "items": {
+        "$ref": "#/$defs/ClashItem"
+      }
+    },
+    "role_fulfilment": {
+      "$ref": "#/$defs/RoleFulfilment"
+    },
+    "structure_analysis": {
+      "$ref": "#/$defs/StructureAnalysis"
+    },
+    "feedback": {
+      "$ref": "#/$defs/Feedback"
+    },
+    "limitations": {
+      "$ref": "#/$defs/Limitations"
+    }
+  },
+  "$defs": {
+    "ObservationType": {
+      "type": "string",
+      "enum": ["direct_observation", "model_interpretation"],
+      "description": "Explicit distinction between directly cited evidence and model inference/interpretation."
+    },
+    "EvidenceReference": {
+      "type": "object",
+      "required": ["source", "quote", "observation_type"],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["target_speech", "prior_speech", "subsequent_speech", "motion_context", "external_knowledge"],
+          "description": "The origin of the evidence in relation to the debate round."
+        },
+        "speaker_identifier": {
+          "type": ["string", "null"],
+          "description": "The speaker or role identifier associated with this excerpt (e.g. 'Speaker 1', 'Prime Minister', or specific speaker name)."
+        },
+        "speech_role": {
+          "type": ["string", "null"],
+          "description": "Debate role associated with the source speech if known (e.g. 'PM', 'DLO', 'MG')."
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Verbatim transcript excerpt or verifiable textual reference."
+        },
+        "start_time": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Audio timestamp in seconds where the excerpt begins."
+        },
+        "end_time": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Audio timestamp in seconds where the excerpt ends."
+        },
+        "observation_type": {
+          "$ref": "#/$defs/ObservationType"
+        },
+        "notes": {
+          "type": ["string", "null"],
+          "description": "Additional context or provenance note regarding the quotation or timestamp."
+        }
+      }
+    },
+    "AnalysisMetadata": {
+      "type": "object",
+      "required": [
+        "target_speaker_name",
+        "target_speech_role",
+        "debate_format",
+        "context_completeness"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "target_speaker_name": {
+          "type": "string",
+          "description": "Name or placeholder identifier of the evaluated speaker."
+        },
+        "target_team_side": {
+          "type": ["string", "null"],
+          "description": "Side in debate (e.g. 'Affirmative', 'Negative', 'OG', 'OO', 'CG', 'CO', 'Proposition', 'Opposition')."
+        },
+        "target_speech_role": {
+          "type": "string",
+          "description": "The formal role/position of the speaker (e.g. '1st Proposition', 'Prime Minister', 'Opposition Whip')."
+        },
+        "debate_format": {
+          "type": "string",
+          "description": "Debate format ruleset (e.g. 'BP', 'Australs', 'WSDC', 'AP', 'Easters')."
+        },
+        "motion": {
+          "type": ["string", "null"],
+          "description": "The motion debated in the round, if provided."
+        },
+        "info_slide": {
+          "type": ["string", "null"],
+          "description": "Accompanying info slide or context slide, if provided."
+        },
+        "context_completeness": {
+          "type": "string",
+          "enum": ["full_debate", "partial_round", "isolated_speech"],
+          "description": "Level of broader debate context supplied during analysis."
+        },
+        "available_speech_roles": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of speeches in the debate for which transcript context was available."
+        },
+        "model_identifier": {
+          "type": ["string", "null"],
+          "description": "Identifier of the model that generated this analysis."
+        },
+        "generated_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of analysis generation."
+        }
+      }
+    },
+    "ArgumentItem": {
+      "type": "object",
+      "required": [
+        "claim",
+        "reasoning",
+        "strengths",
+        "weaknesses",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "claim": {
+          "type": "string",
+          "description": "Summary of the core claim or proposition asserted."
+        },
+        "reasoning": {
+          "type": "string",
+          "description": "The substantive explanation, mechanism, or causal chain presented."
+        },
+        "strengths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Analytical and persuasive strengths of this argument."
+        },
+        "weaknesses": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Vulnerabilities, unproven assumptions, or logical gaps."
+        },
+        "unsupported_claims_or_gaps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Specific missing evidentiary links, mechanisms, or warrants identified."
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceReference" }
+        }
+      }
+    },
+    "RebuttalItem": {
+      "type": "object",
+      "required": [
+        "target_argument",
+        "effectiveness",
+        "engagement_type",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "target_argument": {
+          "type": "string",
+          "description": "The opposing argument or case point targeted by the speaker."
+        },
+        "target_speaker_or_side": {
+          "type": ["string", "null"],
+          "description": "Which opposing speaker or side advanced the argument."
+        },
+        "engagement_type": {
+          "type": "string",
+          "enum": ["direct_rebuttal", "counter_framing", "mere_mention", "mitigation", "turning_the_argument"],
+          "description": "Distinguishes substantive engagement from superficial referencing or mere mention."
+        },
+        "response_summary": {
+          "type": "string",
+          "description": "How the speaker answered or challenged the argument."
+        },
+        "effectiveness": {
+          "type": "string",
+          "enum": ["strong", "moderate", "weak", "ineffective", "unevaluated"],
+          "description": "Assessment of the logical impact and execution of the rebuttal."
+        },
+        "missed_rebuttal_opportunities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Readily identifiable opposing points or nuances that were unaddressed."
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceReference" }
+        }
+      }
+    },
+    "ClashItem": {
+      "type": "object",
+      "required": [
+        "clash_theme",
+        "speaker_engagement",
+        "comparative_weighing",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "clash_theme": {
+          "type": "string",
+          "description": "The underlying dispute or focal clash point across teams."
+        },
+        "speaker_engagement": {
+          "type": "string",
+          "description": "How the speaker positioned their side regarding this central dispute."
+        },
+        "comparative_weighing": {
+          "type": "string",
+          "description": "Use of weighing metrics (e.g. scale, reversibility, likelihood, vulnerability) to prove their side wins the clash."
+        },
+        "unaddressed_dimensions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Facets of the clash where opposing framing or weighing went unanswered."
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceReference" }
+        }
+      }
+    },
+    "RoleFulfilment": {
+      "type": "object",
+      "required": [
+        "expected_responsibilities",
+        "fulfilled_responsibilities",
+        "missing_or_insufficient_responsibilities",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "expected_responsibilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Normative duties for this speech position in the stated format."
+        },
+        "fulfilled_responsibilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Duties adequately or exceptionally discharged."
+        },
+        "missing_or_insufficient_responsibilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Duties omitted, underdeveloped, or improperly executed."
+        },
+        "format_specific_notes": {
+          "type": ["string", "null"],
+          "description": "Contextual nuances (e.g. extension constraints in BP closing half, whips not creating new arguments)."
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceReference" }
+        }
+      }
+    },
+    "StructureAnalysis": {
+      "type": "object",
+      "required": [
+        "organization_and_progression",
+        "clarity_and_coherence",
+        "transitions_and_signposting"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "organization_and_progression": {
+          "type": "string",
+          "description": "How the speech was ordered (e.g. roadmap, sequencing from rebuttal to substantive)."
+        },
+        "clarity_and_coherence": {
+          "type": "string",
+          "description": "Ease of following the line of argumentation."
+        },
+        "transitions_and_signposting": {
+          "type": "string",
+          "description": "Use of explicit roadmap, numbered labels, or transitions between arguments."
+        },
+        "time_management_notes": {
+          "type": ["string", "null"],
+          "description": "Observations regarding time pacing across speech sections if timestamps permit."
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceReference" }
+        }
+      }
+    },
+    "Feedback": {
+      "type": "object",
+      "required": [
+        "strengths",
+        "areas_for_improvement",
+        "actionable_suggestions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "strengths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Concrete positive elements observed in the performance."
+        },
+        "areas_for_improvement": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Specific gaps or weaknesses in argumentation, rebuttal, or strategy."
+        },
+        "actionable_suggestions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Direct, practical advice on what the speaker could do differently next time."
+        }
+      }
+    },
+    "Limitations": {
+      "type": "object",
+      "required": [
+        "missing_debate_context",
+        "insufficient_transcript_evidence",
+        "uncertain_interpretations",
+        "unevaluated_dimensions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "missing_debate_context": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Debate context absent during analysis (e.g. unrecorded prior speeches, unknown POIs, unrecorded motion info slide)."
+        },
+        "insufficient_transcript_evidence": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Moments where inaudibility, STT transcription errors, or brevity prevented confident evaluation."
+        },
+        "uncertain_interpretations": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Observations that are plausible but open to multiple interpretations."
+        },
+        "unevaluated_dimensions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Dimensions explicitly not evaluated (e.g. style, delivery, body language, unprovided format rules)."
+        }
+      }
+    }
+  }
+}
